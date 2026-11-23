@@ -57,6 +57,17 @@ OBC and Charter legs with nobody assigned are marked with an amber **Unassigned*
 
 Edit writes `assigned_to`, `aircraft`, `phone`, `notes`, `airline`, `flight_number`, `departure_time`, `departure_airport`, and `departure_terminal`, and stamps `edited_by` / `edited_at`. The board refreshes about once a minute, and waits while an edit is open.
 
+## Tabs
+
+The signed-in site has three tabs. The board is the default.
+
+- **Board** — the dispatch cards described above. **Past dates** shows earlier pickup dates in the same card layout.
+- **NKR Moves** — a week-by-week table of current and upcoming moves (Sunday–Saturday in `America/New_York`), with counts by type for the selected week and month-by-month totals. Monthly totals count Completed and Scheduled legs and omit Removed, unless you turn on **Show removed**. Type is shown as OBC, not CommObc. Flight and who is assigned appear as columns when they are known.
+- **History** — completed moves, newest first, with Removed available through a status filter. Filter by month, type, and center, and search swap, flight, and names. Same columns as the NKR Moves table, including flight and who was assigned.
+
+Direct links: `/#nkr` and `/#history`.
+
+
 ## Auth
 
 `GET /login` and `GET /healthz` are public. Everything else needs a session cookie from `POST /login` with form fields `name` and `password`. `name` is the display name stamped on edits (trimmed, required, 40 characters). The cookie is `pf_session`, HttpOnly, SameSite=Lax, and lasts 30 days. On Render it is Secure.

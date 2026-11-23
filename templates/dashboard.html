@@ -8,7 +8,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body data-today="{{ today }}" data-name="{{ name }}">
+<body data-today="{{ today }}" data-name="{{ name }}" data-tab="board">
   <header class="top">
     <div class="brand">
       <span class="mark" aria-hidden="true">PF</span>
@@ -26,56 +26,174 @@
   </header>
 
   <main class="wrap">
-    <section class="tiles" id="tiles" aria-label="Summary">
-      <button type="button" data-tile="today" aria-pressed="false">
-        <span class="num" id="n-today">–</span>
-        <span class="label">Moves today</span>
-        <span class="hint">New York date</span>
-      </button>
-      <button type="button" data-tile="next" aria-pressed="false">
-        <span class="num" id="n-next">–</span>
-        <span class="label">Next 3 days</span>
-        <span class="hint" id="hint-next">Tomorrow through +3</span>
-      </button>
-      <button type="button" data-tile="open" aria-pressed="false">
-        <span class="num" id="n-open">–</span>
-        <span class="label">Unassigned</span>
-        <span class="hint">OBC and charter</span>
-      </button>
-    </section>
+    <nav class="tabs" role="tablist" aria-label="Dashboard views">
+      <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="true">Board</button>
+      <button type="button" role="tab" id="tab-nkr" aria-controls="panel-nkr" aria-selected="false">NKR Moves</button>
+      <button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false">History</button>
+    </nav>
 
-    <div class="toolbar">
-      <label class="search">
-        <span class="sr">Search</span>
-        <input id="q" type="search" placeholder="Search swap, center, name, flight, AWB" autocomplete="off">
-      </label>
-      <div class="chips" id="types" role="group" aria-label="Filter by type">
-        <button type="button" data-type="all" aria-pressed="true">All</button>
-        <button type="button" data-type="Commercial" aria-pressed="false">Commercial</button>
-        <button type="button" data-type="Charter" aria-pressed="false">Charter</button>
-        <button type="button" data-type="OBC" aria-pressed="false">OBC</button>
-        <button type="button" data-type="Ground" aria-pressed="false">Ground</button>
-        <button type="button" data-type="Internal" aria-pressed="false">Internal</button>
+    <p id="banner" class="form-error" hidden></p>
+
+    <div id="panel-board" class="panel" role="tabpanel" aria-labelledby="tab-board">
+      <section class="tiles" id="tiles" aria-label="Summary">
+        <button type="button" data-tile="today" aria-pressed="false">
+          <span class="num" id="n-today">–</span>
+          <span class="label">Moves today</span>
+          <span class="hint">New York date</span>
+        </button>
+        <button type="button" data-tile="next" aria-pressed="false">
+          <span class="num" id="n-next">–</span>
+          <span class="label">Next 3 days</span>
+          <span class="hint" id="hint-next">Tomorrow through +3</span>
+        </button>
+        <button type="button" data-tile="open" aria-pressed="false">
+          <span class="num" id="n-open">–</span>
+          <span class="label">Unassigned</span>
+          <span class="hint">OBC and charter</span>
+        </button>
+      </section>
+
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr">Search</span>
+          <input id="q" type="search" placeholder="Search swap, center, name, flight, AWB" autocomplete="off">
+        </label>
+        <div class="chips" id="types" role="group" aria-label="Filter by type">
+          <button type="button" data-type="all" aria-pressed="true">All</button>
+          <button type="button" data-type="Commercial" aria-pressed="false">Commercial</button>
+          <button type="button" data-type="Charter" aria-pressed="false">Charter</button>
+          <button type="button" data-type="OBC" aria-pressed="false">OBC</button>
+          <button type="button" data-type="Ground" aria-pressed="false">Ground</button>
+          <button type="button" data-type="Internal" aria-pressed="false">Internal</button>
+        </div>
+        <div class="bar">
+          <div class="chips" id="statuses" role="group" aria-label="Filter by status">
+            <button type="button" data-status="all" aria-pressed="true">All</button>
+            <button type="button" data-status="Scheduled" aria-pressed="false">Scheduled</button>
+            <button type="button" data-status="Completed" aria-pressed="false">Completed</button>
+            <button type="button" data-status="Removed" aria-pressed="false">Removed</button>
+          </div>
+          <div class="bar-actions">
+            <button type="button" class="ghost" id="history" aria-pressed="false">Past dates</button>
+            <a class="ghost link" href="/api/moves.csv">Export CSV</a>
+            <button type="button" class="ghost" id="refresh">Refresh</button>
+          </div>
+        </div>
       </div>
-      <div class="bar">
-        <div class="chips" id="statuses" role="group" aria-label="Filter by status">
-          <button type="button" data-status="all" aria-pressed="true">All</button>
-          <button type="button" data-status="Scheduled" aria-pressed="false">Scheduled</button>
-          <button type="button" data-status="Completed" aria-pressed="false">Completed</button>
-          <button type="button" data-status="Removed" aria-pressed="false">Removed</button>
+
+      <p id="meta" class="meta">Loading moves…</p>
+      <div id="board"></div>
+      <noscript><p class="form-error">This board needs JavaScript. Export CSV still works from the link above once you are signed in.</p></noscript>
+    </div>
+
+    <div id="panel-nkr" class="panel" role="tabpanel" aria-labelledby="tab-nkr" hidden>
+      <div class="week-nav" id="nkr-week"></div>
+      <section class="tiles week-tiles" id="nkr-tiles" aria-label="Moves this week by type"></section>
+      <div class="bar nkr-bar">
+        <p id="nkr-meta" class="meta">Loading week…</p>
+        <label class="toggle">
+          <input type="checkbox" id="nkr-removed">
+          Show removed
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table class="moves" id="nkr-table">
+          <caption class="sr">Moves in the selected week</caption>
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Swap #</th>
+              <th scope="col">Donor to recipient</th>
+              <th scope="col">Type</th>
+              <th scope="col">Pickup</th>
+              <th scope="col">Delivery</th>
+              <th scope="col">Flight</th>
+              <th scope="col">Status</th>
+              <th scope="col">Assigned</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <section class="months">
+        <h2>Month-by-month totals</h2>
+        <p class="lede">Completed and scheduled moves. Removed legs are left out unless you turn on Show removed.</p>
+        <div class="table-wrap">
+          <table class="moves totals" id="nkr-months">
+            <caption class="sr">Monthly totals by type</caption>
+            <thead>
+              <tr>
+                <th scope="col">Month</th>
+                <th scope="col">Commercial</th>
+                <th scope="col">Charter</th>
+                <th scope="col">OBC</th>
+                <th scope="col">Ground</th>
+                <th scope="col">Internal</th>
+                <th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
-        <div class="bar-actions">
-          <button type="button" class="ghost" id="history" aria-pressed="false">History</button>
-          <a class="ghost link" href="/api/moves.csv">Export CSV</a>
-          <button type="button" class="ghost" id="refresh">Refresh</button>
+      </section>
+    </div>
+
+    <div id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr">Search history</span>
+          <input id="hist-q" type="search" placeholder="Search swap, center, flight, name" autocomplete="off">
+        </label>
+        <div class="filters">
+          <label class="select">
+            <span>Month</span>
+            <select id="hist-month">
+              <option value="all">All months</option>
+            </select>
+          </label>
+          <label class="select">
+            <span>Center</span>
+            <select id="hist-center">
+              <option value="all">All centers</option>
+            </select>
+          </label>
         </div>
+        <div class="chips" id="hist-types" role="group" aria-label="Filter history by type">
+          <button type="button" data-hist-type="all" aria-pressed="true">All</button>
+          <button type="button" data-hist-type="Commercial" aria-pressed="false">Commercial</button>
+          <button type="button" data-hist-type="Charter" aria-pressed="false">Charter</button>
+          <button type="button" data-hist-type="OBC" aria-pressed="false">OBC</button>
+          <button type="button" data-hist-type="Ground" aria-pressed="false">Ground</button>
+          <button type="button" data-hist-type="Internal" aria-pressed="false">Internal</button>
+        </div>
+        <div class="chips" id="hist-status" role="group" aria-label="Filter history by status">
+          <button type="button" data-hist-status="completed" aria-pressed="true">Completed</button>
+          <button type="button" data-hist-status="removed" aria-pressed="false">Removed</button>
+          <button type="button" data-hist-status="all" aria-pressed="false">All</button>
+        </div>
+      </div>
+      <p id="hist-meta" class="meta">Loading history…</p>
+      <div class="table-wrap">
+        <table class="moves" id="hist-table">
+          <caption class="sr">Past moves, newest first</caption>
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Swap #</th>
+              <th scope="col">Donor to recipient</th>
+              <th scope="col">Type</th>
+              <th scope="col">Pickup</th>
+              <th scope="col">Delivery</th>
+              <th scope="col">Flight</th>
+              <th scope="col">Status</th>
+              <th scope="col">Assigned</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
 
-    <p id="banner" class="form-error" hidden></p>
-    <p id="meta" class="meta">Loading moves…</p>
-    <div id="board"></div>
-    <noscript><p class="form-error">This board needs JavaScript. Export CSV still works from the link above once you are signed in.</p></noscript>
     <p class="foot">Internal · ParaFlight Aero · times shown as scheduled, with their own zone</p>
   </main>
   <script src="/static/app.js"></script>

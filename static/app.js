@@ -7,6 +7,14 @@
   let typeFilter = 'all';
   let statusFilter = 'all';
   let query = '';
+  let tab = 'board';
+  let nkrWeekStart = null;
+  let nkrShowRemoved = false;
+  let histQuery = '';
+  let histMonth = 'all';
+  let histType = 'all';
+  let histCenter = 'all';
+  let histStatus = 'completed';
 
   const board = document.getElementById('board');
   const meta = document.getElementById('meta');
@@ -419,7 +427,7 @@
 
   function syncHistory() {
     historyBtn.setAttribute('aria-pressed', history ? 'true' : 'false');
-    historyBtn.textContent = history ? 'History on' : 'History';
+    historyBtn.textContent = history ? 'Past dates on' : 'Past dates';
   }
 
   async function save(form, id) {
@@ -455,7 +463,7 @@
     const index = moves.findIndex(function (move) { return move.swap_id === id; });
     if (index >= 0) moves[index] = data.move;
     renderTiles();
-    renderBoard();
+    renderActive();
   }
 
   function showFormError(form, message) {
@@ -480,12 +488,333 @@
         timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
       });
       meta.textContent = 'Updated ' + clock + ' ET · ' + moves.length + ' legs';
+      if (!nkrWeekStart) nkrWeekStart = weekStartSunday(today);
       renderTiles();
-      if (!document.querySelector('.editor')) renderBoard();
+      renderActive();
     } catch (err) {
       banner.hidden = false;
       banner.textContent = 'Could not load moves. Check the connection and refresh.';
     }
+  }
+
+
+  const COUNT_METHODS = ['Commercial', 'Charter', 'OBC', 'Ground', 'Internal'];
+
+  function utcDate(iso) {
+    const parts = String(iso).split('-').map(Number);
+    return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  }
+
+  function weekStartSunday(iso) {
+    if (!iso) return '';
+    const date = utcDate(iso);
+    date.setUTCDate(date.getUTCDate() - date.getUTCDay());
+    return date.toISOString().slice(0, 10);
+  }
+
+  function weekEndSaturday(start) {
+    return addDays(start, 6);
+  }
+
+  function weekLabel(start) {
+    if (!start) return '';
+    const endDate = utcDate(weekEndSaturday(start));
+    const startDate = utcDate(start);
+    const sm = startDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    const em = endDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    if (sm === em) return sm + ' ' + startDate.getUTCDate() + '–' + endDate.getUTCDate();
+    return sm + ' ' + startDate.getUTCDate() + '–' + em + ' ' + endDate.getUTCDate();
+  }
+
+  function shortDate(iso) {
+    if (!iso) return '—';
+    return utcDate(iso).toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+    });
+  }
+
+  function monthTitle(yearMonth) {
+    const parts = String(yearMonth).split('-').map(Number);
+    const date = new Date(Date.UTC(parts[0], parts[1] - 1, 1));
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+
+  function emptyCounts() {
+    const counts = { Other: 0, removed: 0, total: 0 };
+    COUNT_METHODS.forEach(function (name) { counts[name] = 0; });
+    return counts;
+  }
+
+  function addCount(bucket, move) {
+    const label = methodLabel(move.method);
+    if (COUNT_METHODS.indexOf(label) !== -1) bucket[label] += 1;
+    else bucket.Other += 1;
+    bucket.total += 1;
+    if (isRemoved(move)) bucket.removed += 1;
+  }
+
+  function datedMoves() {
+    return moves.filter(function (move) { return !!(move.pickup_date || '').trim(); });
+  }
+
+  function weekRangeBounds() {
+    const starts = datedMoves().map(function (move) { return weekStartSunday(move.pickup_date); });
+    const current = weekStartSunday(today);
+    starts.push(current);
+    starts.sort();
+    return { min: starts[0], max: starts[starts.length - 1], current: current };
+  }
+
+  function inWeek(move, start) {
+    const date = move.pickup_date || '';
+    if (!date || !start) return false;
+    return date >= start && date <= weekEndSaturday(start);
+  }
+
+  function flightCell(move) {
+    if (isCommercialFlight(move) || !isBlank(move.airline) || !isBlank(move.flight_number)) {
+      return flightLine(move);
+    }
+    return '—';
+  }
+
+  function assignedCell(move) {
+    return isBlank(move.assigned_to) ? '—' : move.assigned_to;
+  }
+
+  function emptyTableRow(message, cols) {
+    const tr = el('tr', { class: 'empty-row' });
+    tr.append(el('td', { text: message, colspan: String(cols), 'data-label': '' }));
+    return tr;
+  }
+
+  function moveRow(move) {
+    const cells = [
+      [shortDate(move.pickup_date), 'Date', ''],
+      [move.swap_id || '—', 'Swap #', 'cell-swap'],
+      [(move.donor || '—') + ' → ' + (move.recipient || '—'), 'Donor to recipient', 'cell-route'],
+      [methodLabel(move.method), 'Type', ''],
+      [move.pickup || '—', 'Pickup', ''],
+      [move.delivery || '—', 'Delivery', ''],
+      [flightCell(move), 'Flight', 'cell-flight'],
+      [move.status || '—', 'Status', ''],
+      [assignedCell(move), 'Assigned', ''],
+    ];
+    const tr = el('tr', { class: isRemoved(move) ? 'removed' : '' });
+    cells.forEach(function (cell) {
+      const td = el('td', { 'data-label': cell[1], text: cell[0] });
+      if (cell[2]) td.className = cell[2];
+      tr.append(td);
+    });
+    return tr;
+  }
+
+  function weekRows() {
+    const start = nkrWeekStart || weekStartSunday(today);
+    return datedMoves().filter(function (move) {
+      if (!inWeek(move, start)) return false;
+      if (isRemoved(move) && !nkrShowRemoved) return false;
+      return true;
+    }).sort(function (a, b) {
+      if (a.pickup_date !== b.pickup_date) return a.pickup_date < b.pickup_date ? -1 : 1;
+      return String(a.swap_id).localeCompare(String(b.swap_id), 'en', { numeric: true });
+    });
+  }
+
+  function renderNkr() {
+    if (!nkrWeekStart) nkrWeekStart = weekStartSunday(today);
+    const bounds = weekRangeBounds();
+    const start = nkrWeekStart;
+    const label = weekLabel(start);
+    const nav = document.getElementById('nkr-week');
+    nav.replaceChildren();
+    const prev = el('button', { type: 'button', class: 'ghost', id: 'nkr-prev', 'aria-label': 'Previous week', text: 'Prev' });
+    const next = el('button', { type: 'button', class: 'ghost', id: 'nkr-next', 'aria-label': 'Next week', text: 'Next' });
+    const jump = el('button', { type: 'button', class: 'ghost', id: 'nkr-today', text: 'This week' });
+    if (start <= bounds.min) prev.setAttribute('disabled', 'disabled');
+    if (start >= bounds.max) next.setAttribute('disabled', 'disabled');
+    if (start === bounds.current) jump.hidden = true;
+    nav.append(prev, el('h2', { text: label }), next, jump);
+
+    const rows = weekRows();
+    const counts = emptyCounts();
+    rows.forEach(function (move) { addCount(counts, move); });
+
+    const tiles = document.getElementById('nkr-tiles');
+    tiles.replaceChildren();
+    COUNT_METHODS.forEach(function (name) {
+      tiles.append(el('div', { class: 'tile' }, [
+        el('span', { class: 'num', text: String(counts[name]) }),
+        el('span', { class: 'label', text: name }),
+      ]));
+    });
+
+    const removedNote = nkrShowRemoved && counts.removed
+      ? ' · ' + counts.removed + ' removed'
+      : '';
+    document.getElementById('nkr-meta').textContent = counts.total
+      + (counts.total === 1 ? ' move' : ' moves')
+      + ' in the week of ' + label + removedNote + '. Sunday–Saturday, Eastern.';
+
+    const tbody = document.querySelector('#nkr-table tbody');
+    tbody.replaceChildren();
+    if (!rows.length) {
+      tbody.append(emptyTableRow(
+        nkrShowRemoved ? 'No moves in this week.' : 'No moves in this week (removed are hidden).',
+        9,
+      ));
+    } else {
+      rows.forEach(function (move) { tbody.append(moveRow(move)); });
+    }
+    renderMonths();
+  }
+
+  function renderMonths() {
+    const buckets = {};
+    datedMoves().forEach(function (move) {
+      if (isRemoved(move) && !nkrShowRemoved) return;
+      const key = move.pickup_date.slice(0, 7);
+      if (!buckets[key]) buckets[key] = emptyCounts();
+      addCount(buckets[key], move);
+    });
+    const keys = Object.keys(buckets).sort();
+    const tbody = document.querySelector('#nkr-months tbody');
+    tbody.replaceChildren();
+    let tfoot = document.querySelector('#nkr-months tfoot');
+    if (!tfoot) {
+      tfoot = el('tfoot');
+      document.getElementById('nkr-months').append(tfoot);
+    }
+    tfoot.replaceChildren();
+    if (!keys.length) {
+      tbody.append(emptyTableRow('No monthly totals yet.', 7));
+      return;
+    }
+    const grand = emptyCounts();
+    const labels = ['Month', 'Commercial', 'Charter', 'OBC', 'Ground', 'Internal', 'Total'];
+    keys.forEach(function (key) {
+      const bucket = buckets[key];
+      COUNT_METHODS.forEach(function (name) { grand[name] += bucket[name]; });
+      grand.total += bucket.total;
+      grand.removed += bucket.removed;
+      const values = [monthTitle(key), bucket.Commercial, bucket.Charter, bucket.OBC, bucket.Ground, bucket.Internal, bucket.total];
+      const tr = el('tr');
+      values.forEach(function (value, i) {
+        tr.append(el('td', { 'data-label': labels[i], text: String(value) }));
+      });
+      tbody.append(tr);
+    });
+    const foot = el('tr');
+    [ 'All months', grand.Commercial, grand.Charter, grand.OBC, grand.Ground, grand.Internal, grand.total ].forEach(function (value, i) {
+      foot.append(el('td', { 'data-label': labels[i], text: String(value) }));
+    });
+    tfoot.append(foot);
+  }
+
+  function historySource() {
+    return moves.filter(function (move) { return isCompleted(move) || isRemoved(move); });
+  }
+
+  function historyMoves() {
+    return historySource().filter(function (move) {
+      if (histStatus === 'completed' && !isCompleted(move)) return false;
+      if (histStatus === 'removed' && !isRemoved(move)) return false;
+      if (histMonth !== 'all' && (move.pickup_date || '').slice(0, 7) !== histMonth) return false;
+      if (histType !== 'all' && methodLabel(move.method) !== histType) return false;
+      if (histCenter !== 'all' && move.donor !== histCenter && move.recipient !== histCenter) return false;
+      const tokens = histQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      if (tokens.length) {
+        const hay = haystack(move);
+        if (!tokens.every(function (token) { return hay.indexOf(token) !== -1; })) return false;
+      }
+      return true;
+    }).sort(function (a, b) {
+      const da = a.pickup_date || '';
+      const db = b.pickup_date || '';
+      if (da !== db) return da < db ? 1 : -1;
+      return String(a.swap_id).localeCompare(String(b.swap_id), 'en', { numeric: true });
+    });
+  }
+
+  function renderHistoryFilters() {
+    const monthSelect = document.getElementById('hist-month');
+    const centerSelect = document.getElementById('hist-center');
+    const past = historySource();
+    const months = Array.from(new Set(past.map(function (move) {
+      return (move.pickup_date || '').slice(0, 7);
+    }).filter(Boolean))).sort().reverse();
+    const centers = Array.from(new Set(past.flatMap(function (move) {
+      return [move.donor, move.recipient];
+    }).filter(function (name) { return !isBlank(name); }))).sort(function (a, b) {
+      return a.localeCompare(b, 'en', { sensitivity: 'base' });
+    });
+
+    const prevMonth = histMonth;
+    monthSelect.replaceChildren(el('option', { value: 'all', text: 'All months' }));
+    months.forEach(function (yearMonth) {
+      monthSelect.append(el('option', { value: yearMonth, text: monthTitle(yearMonth) }));
+    });
+    monthSelect.value = (prevMonth === 'all' || months.indexOf(prevMonth) !== -1) ? prevMonth : 'all';
+    histMonth = monthSelect.value;
+
+    const prevCenter = histCenter;
+    centerSelect.replaceChildren(el('option', { value: 'all', text: 'All centers' }));
+    centers.forEach(function (name) {
+      centerSelect.append(el('option', { value: name, text: name }));
+    });
+    centerSelect.value = (prevCenter === 'all' || centers.indexOf(prevCenter) !== -1) ? prevCenter : 'all';
+    histCenter = centerSelect.value;
+  }
+
+  function renderHistory() {
+    renderHistoryFilters();
+    const rows = historyMoves();
+    const scope = histStatus === 'completed' ? 'completed'
+      : (histStatus === 'removed' ? 'removed' : 'completed or removed');
+    document.getElementById('hist-meta').textContent = rows.length
+      + (rows.length === 1 ? ' move' : ' moves')
+      + ' · ' + scope + ' · newest first';
+    const tbody = document.querySelector('#hist-table tbody');
+    tbody.replaceChildren();
+    if (!rows.length) {
+      tbody.append(emptyTableRow('No past moves match these filters.', 9));
+    } else {
+      rows.forEach(function (move) { tbody.append(moveRow(move)); });
+    }
+  }
+
+  function tabFromHash() {
+    const hash = (location.hash || '').replace('#', '').toLowerCase();
+    if (hash === 'nkr' || hash === 'nkr-moves') return 'nkr';
+    if (hash === 'history') return 'history';
+    return 'board';
+  }
+
+  function hashForTab(name) {
+    if (name === 'nkr') return '#nkr';
+    if (name === 'history') return '#history';
+    return '#board';
+  }
+
+  function showTab(name, updateHash) {
+    tab = name === 'nkr' || name === 'history' ? name : 'board';
+    document.body.setAttribute('data-tab', tab);
+    ['board', 'nkr', 'history'].forEach(function (item) {
+      const selected = item === tab;
+      document.getElementById('tab-' + item).setAttribute('aria-selected', selected ? 'true' : 'false');
+      document.getElementById('panel-' + item).hidden = !selected;
+    });
+    if (updateHash !== false) {
+      const next = hashForTab(tab);
+      if (location.hash !== next) window.history.replaceState(null, '', next);
+    }
+    renderActive();
+  }
+
+  function renderActive() {
+    if (tab === 'nkr') renderNkr();
+    else if (tab === 'history') renderHistory();
+    else if (!document.querySelector('.editor')) renderBoard();
   }
 
   document.getElementById('tiles').addEventListener('click', function (event) {
@@ -546,6 +875,76 @@
     const input = cardNode.querySelector('input');
     if (input) input.focus();
   });
+
+
+  document.querySelector('.tabs').addEventListener('click', function (event) {
+    const button = event.target.closest('[role=tab]');
+    if (!button) return;
+    showTab(button.id.replace('tab-', ''));
+  });
+
+  document.getElementById('nkr-week').addEventListener('click', function (event) {
+    const button = event.target.closest('button');
+    if (!button || button.disabled) return;
+    const bounds = weekRangeBounds();
+    if (button.id === 'nkr-prev' && nkrWeekStart > bounds.min) {
+      nkrWeekStart = addDays(nkrWeekStart, -7);
+    } else if (button.id === 'nkr-next' && nkrWeekStart < bounds.max) {
+      nkrWeekStart = addDays(nkrWeekStart, 7);
+    } else if (button.id === 'nkr-today') {
+      nkrWeekStart = bounds.current;
+    } else {
+      return;
+    }
+    renderNkr();
+  });
+
+  document.getElementById('nkr-removed').addEventListener('change', function (event) {
+    nkrShowRemoved = event.target.checked;
+    renderNkr();
+  });
+
+  document.getElementById('hist-q').addEventListener('input', function (event) {
+    histQuery = event.target.value.trim();
+    renderHistory();
+  });
+
+  document.getElementById('hist-month').addEventListener('change', function (event) {
+    histMonth = event.target.value;
+    renderHistory();
+  });
+
+  document.getElementById('hist-center').addEventListener('change', function (event) {
+    histCenter = event.target.value;
+    renderHistory();
+  });
+
+  document.getElementById('hist-types').addEventListener('click', function (event) {
+    const button = event.target.closest('button');
+    if (!button) return;
+    histType = button.getAttribute('data-hist-type');
+    document.querySelectorAll('#hist-types button').forEach(function (item) {
+      item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+    });
+    renderHistory();
+  });
+
+  document.getElementById('hist-status').addEventListener('click', function (event) {
+    const button = event.target.closest('button');
+    if (!button) return;
+    histStatus = button.getAttribute('data-hist-status');
+    document.querySelectorAll('#hist-status button').forEach(function (item) {
+      item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+    });
+    renderHistory();
+  });
+
+  window.addEventListener('hashchange', function () {
+    showTab(tabFromHash(), false);
+  });
+
+  tab = tabFromHash();
+  showTab(tab, false);
 
   setInterval(function () {
     if (document.visibilityState === 'hidden') return;

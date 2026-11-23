@@ -12,7 +12,7 @@ import re
 import ssl
 import threading
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 NY = ZoneInfo('America/New_York')
@@ -591,6 +591,120 @@ def _connect_postgres(url):
             ctx.verify_mode = ssl.CERT_NONE
         kwargs['ssl_context'] = ctx
     return pg8000.dbapi.connect(**kwargs)
+
+
+
+COUNT_METHODS = ('Commercial', 'Charter', 'OBC', 'Ground', 'Internal')
+
+_METHOD_LABELS = {
+    'commercial': 'Commercial',
+    'charter': 'Charter',
+    'commobc': 'OBC',
+    'obc': 'OBC',
+    'onboardcourier': 'OBC',
+    'ground': 'Ground',
+    'internal': 'Internal',
+}
+
+
+def method_label(method):
+    """Canonical type label for UI and totals. CommObc is shown as OBC."""
+    key = re.sub(r'[^a-z]', '', (method or '').lower())
+    if key in _METHOD_LABELS:
+        return _METHOD_LABELS[key]
+    return method if method else 'Other'
+
+
+def week_start_sunday(iso):
+    """Sunday that starts the Eastern calendar week containing YYYY-MM-DD."""
+    if not iso:
+        return None
+    year, month, day = (int(part) for part in str(iso).split('-')[:3])
+    current = datetime(year, month, day, tzinfo=timezone.utc)
+    offset = (current.weekday() + 1) % 7
+    return (current - timedelta(days=offset)).date().isoformat()
+
+
+def week_end_saturday(start_iso):
+    if not start_iso:
+        return None
+    year, month, day = (int(part) for part in str(start_iso).split('-')[:3])
+    end = datetime(year, month, day, tzinfo=timezone.utc) + timedelta(days=6)
+    return end.date().isoformat()
+
+
+def week_label(start_iso):
+    """Short Eastern week label, e.g. 'Nov 22–28' or 'Nov 29–Dec 5'."""
+    if not start_iso:
+        return ''
+    year, month, day = (int(part) for part in str(start_iso).split('-')[:3])
+    start = datetime(year, month, day, tzinfo=timezone.utc)
+    end = start + timedelta(days=6)
+    if start.month == end.month:
+        return f'{start.strftime("%b")} {start.day}–{end.day}'
+    return f'{start.strftime("%b")} {start.day}–{end.strftime("%b")} {end.day}'
+
+
+def month_label(year_month):
+    year, month = (int(part) for part in year_month.split('-')[:2])
+    return datetime(year, month, 1, tzinfo=timezone.utc).strftime('%B %Y')
+
+
+def _empty_counts():
+    counts = {name: 0 for name in COUNT_METHODS}
+    counts['Other'] = 0
+    counts['removed'] = 0
+    counts['total'] = 0
+    return counts
+
+
+def _count_move(bucket, move):
+    label = method_label(move.get('method'))
+    if label in COUNT_METHODS:
+        bucket[label] += 1
+    else:
+        bucket['Other'] += 1
+    bucket['total'] += 1
+    if (move.get('status') or '').strip().lower() == 'removed':
+        bucket['removed'] += 1
+
+
+def month_totals(moves, include_removed=False):
+    """Totals by pickup month. Completed + Scheduled; Removed optional."""
+    buckets = {}
+    for move in moves:
+        date = (move.get('pickup_date') or '').strip()
+        if len(date) < 7:
+            continue
+        removed = (move.get('status') or '').strip().lower() == 'removed'
+        if removed and not include_removed:
+            continue
+        key = date[:7]
+        bucket = buckets.setdefault(key, _empty_counts())
+        _count_move(bucket, move)
+    rows = []
+    for key in sorted(buckets):
+        row = {'month': key, 'label': month_label(key)}
+        row.update(buckets[key])
+        rows.append(row)
+    return rows
+
+
+def week_counts(moves, start_iso, include_removed=False):
+    """Type counts for the Sunday–Saturday week starting at start_iso."""
+    end_iso = week_end_saturday(start_iso)
+    bucket = _empty_counts()
+    rows = []
+    for move in moves:
+        date = (move.get('pickup_date') or '').strip()
+        if not start_iso or not date or date < start_iso or date > end_iso:
+            continue
+        removed = (move.get('status') or '').strip().lower() == 'removed'
+        if removed and not include_removed:
+            continue
+        _count_move(bucket, move)
+        rows.append(move)
+    return bucket, rows
 
 
 store = Store()
