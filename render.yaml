@@ -2,8 +2,7 @@
 # https://dashboard.render.com/blueprint/new?repo=https://github.com/urgentflights/pf-dashboard
 # TEAM_PASSWORD is entered in the Dashboard on the first Blueprint create.
 # INGEST_TOKEN and SECRET_KEY are generated once and then left alone.
-# Free Postgres expires 30 days after creation. Before that, change the database
-# plan to basic-256mb (same size, kept) and sync the Blueprint. See the README.
+# Database is on the paid Basic plan (always kept).
 services:
   - type: web
     name: pf-dashboard
@@ -28,9 +27,10 @@ services:
 
 databases:
   - name: pf-dashboard-db
-    plan: free
+    plan: basic-256mb
+    diskSizeGB: 1
     region: virginia
-    databaseName: pf_dashboard
-    user: pf_dashboard_user
+    databaseName: pf_dashboard_db
+    user: pf_dashboard_db_user
     postgresMajorVersion: "16"
     ipAllowList: []
