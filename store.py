@@ -7,7 +7,9 @@ are never written by ingest. Airline, flight number, departure time, airport,
 and terminal are team-editable; ingest may fill them only when empty.
 """
 
+import hashlib
 import os
+import secrets
 import re
 import ssl
 import threading
@@ -172,6 +174,28 @@ CREATE TABLE IF NOT EXISTS moves (
 )
 """
 
+_USER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL,
+    password_hash TEXT,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_login TEXT
+)
+"""
+
+_TOKEN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS setup_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+)
+"""
+
 
 def today_ny():
     return datetime.now(NY).date().isoformat()
@@ -330,6 +354,7 @@ class Store:
             self._open()
             self._exec(_SCHEMA)
             self._migrate()
+            self._ensure_user_tables()
             self.conn.commit()
 
     def describe(self):
@@ -501,11 +526,203 @@ class Store:
         rows = self._exec(f'SELECT {cols} FROM moves WHERE swap_id = ?', (swap_id,))
         return rows[0] if rows else None
 
+    def _ensure_user_tables(self):
+        self._exec(_USER_SCHEMA)
+        self._exec(_TOKEN_SCHEMA)
+        self._exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email)')
+
+    def clear_users(self):
+        with self.lock:
+            self._ensure()
+            self._exec('DELETE FROM setup_tokens')
+            self._exec('DELETE FROM users')
+            self.conn.commit()
+
+    def create_user(self, name, email, password_hash, role='staff', status='pending'):
+        user_id = secrets.token_urlsafe(16)
+        now = _utc_stamp()
+        with self.lock:
+            self._ensure()
+            self._exec(
+                'INSERT INTO users (id, email, name, password_hash, role, status, created_at, last_login) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (user_id, email, name, password_hash, role, status, now, None),
+            )
+            row = self._user_row(user_id)
+            self.conn.commit()
+            return row
+
+    def get_user(self, user_id):
+        with self.lock:
+            self._ensure()
+            row = self._user_row(user_id)
+            self.conn.commit()
+            return row
+
+    def get_user_by_email(self, email):
+        email = (email or '').strip().lower()
+        if not email:
+            return None
+        with self.lock:
+            self._ensure()
+            rows = self._exec('SELECT * FROM users WHERE email = ?', (email,))
+            self.conn.commit()
+            return rows[0] if rows else None
+
+    def list_users(self):
+        with self.lock:
+            self._ensure()
+            rows = self._exec('SELECT * FROM users')
+            self.conn.commit()
+        order = {'pending': 0, 'active': 1, 'disabled': 2}
+        rows.sort(key=lambda row: (
+            order.get(row.get('status') or '', 9),
+            0 if (row.get('role') or '') == 'admin' else 1,
+            row.get('created_at') or '',
+            row.get('email') or '',
+        ))
+        return rows
+
+    def admin_exists(self):
+        with self.lock:
+            self._ensure()
+            rows = self._exec("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+            self.conn.commit()
+            return bool(rows)
+
+    def set_user_fields(self, user_id, **fields):
+        allowed = {'name', 'password_hash', 'role', 'status', 'last_login'}
+        sets = []
+        params = []
+        for key, value in fields.items():
+            if key not in allowed:
+                raise ValueError(f'cannot update {key}')
+            sets.append(f'{key} = ?')
+            params.append(value)
+        if not sets:
+            return self.get_user(user_id)
+        params.append(user_id)
+        with self.lock:
+            self._ensure()
+            found = self._exec('SELECT id FROM users WHERE id = ?', (user_id,))
+            if not found:
+                self.conn.commit()
+                return None
+            self._exec(f'UPDATE users SET {", ".join(sets)} WHERE id = ?', params)
+            row = self._user_row(user_id)
+            self.conn.commit()
+            return row
+
+    def delete_pending_user(self, user_id):
+        with self.lock:
+            self._ensure()
+            rows = self._exec('SELECT id, status FROM users WHERE id = ?', (user_id,))
+            if not rows or rows[0].get('status') != 'pending':
+                self.conn.commit()
+                return False
+            self._exec('DELETE FROM setup_tokens WHERE user_id = ?', (user_id,))
+            self._exec('DELETE FROM users WHERE id = ?', (user_id,))
+            self.conn.commit()
+            return True
+
+    def promote_admin(self, email):
+        user = self.get_user_by_email(email)
+        if not user:
+            return None
+        return self.set_user_fields(user['id'], role='admin', status='active')
+
+    def count_active_admins(self, exclude_id=None):
+        with self.lock:
+            self._ensure()
+            rows = self._exec("SELECT id FROM users WHERE role = 'admin' AND status = 'active'")
+            self.conn.commit()
+        if exclude_id:
+            rows = [row for row in rows if row['id'] != exclude_id]
+        return len(rows)
+
+    def mark_login(self, user_id):
+        return self.set_user_fields(user_id, last_login=_utc_stamp())
+
+    def create_setup_token(self, user_id):
+        raw = secrets.token_urlsafe(32)
+        token_hash = hash_token(raw)
+        now = _utc_stamp()
+        expires = _utc_stamp(days=7)
+        with self.lock:
+            self._ensure()
+            found = self._exec('SELECT id FROM users WHERE id = ?', (user_id,))
+            if not found:
+                self.conn.commit()
+                return None
+            self._exec(
+                'UPDATE setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+                (now, user_id),
+            )
+            self._exec(
+                'INSERT INTO setup_tokens (token_hash, user_id, expires_at, used_at) VALUES (?, ?, ?, ?)',
+                (token_hash, user_id, expires, None),
+            )
+            self.conn.commit()
+        return raw
+
+    def lookup_setup_token(self, raw):
+        token_hash = hash_token(raw or '')
+        if not token_hash:
+            return None
+        now = _utc_stamp()
+        with self.lock:
+            self._ensure()
+            rows = self._exec(
+                'SELECT token_hash, user_id, expires_at, used_at FROM setup_tokens WHERE token_hash = ?',
+                (token_hash,),
+            )
+            if not rows:
+                self.conn.commit()
+                return None
+            row = rows[0]
+            if row.get('used_at') or (row.get('expires_at') or '') < now:
+                self.conn.commit()
+                return None
+            user = self._user_row(row['user_id'])
+            self.conn.commit()
+            return user
+
+    def consume_setup_token(self, raw):
+        token_hash = hash_token(raw or '')
+        if not token_hash:
+            return None
+        now = _utc_stamp()
+        with self.lock:
+            self._ensure()
+            rows = self._exec(
+                'SELECT token_hash, user_id, expires_at, used_at FROM setup_tokens WHERE token_hash = ?',
+                (token_hash,),
+            )
+            if not rows:
+                self.conn.commit()
+                return None
+            row = rows[0]
+            if row.get('used_at') or (row.get('expires_at') or '') < now:
+                self.conn.commit()
+                return None
+            self._exec(
+                'UPDATE setup_tokens SET used_at = ? WHERE token_hash = ?',
+                (now, token_hash),
+            )
+            user = self._user_row(row['user_id'])
+            self.conn.commit()
+            return user
+
+    def _user_row(self, user_id):
+        rows = self._exec('SELECT * FROM users WHERE id = ?', (user_id,))
+        return rows[0] if rows else None
+
     def _ensure(self):
         if self.conn is None:
             self._open()
             self._exec(_SCHEMA)
             self._migrate()
+            self._ensure_user_tables()
             self.conn.commit()
 
     def _open(self):
@@ -705,6 +922,33 @@ def week_counts(moves, start_iso, include_removed=False):
         _count_move(bucket, move)
         rows.append(move)
     return bucket, rows
+
+
+
+def _utc_stamp(days=0):
+    when = datetime.now(timezone.utc) + timedelta(days=days)
+    return when.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def hash_token(raw):
+    text = (raw or '').strip()
+    if not text:
+        return ''
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def public_user(row):
+    if not row:
+        return None
+    return {
+        'id': row.get('id'),
+        'email': row.get('email'),
+        'name': row.get('name'),
+        'role': row.get('role'),
+        'status': row.get('status'),
+        'created_at': row.get('created_at'),
+        'last_login': row.get('last_login'),
+    }
 
 
 store = Store()

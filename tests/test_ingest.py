@@ -15,6 +15,7 @@ _TMP = tempfile.NamedTemporaryFile(prefix='pf-test-', suffix='.sqlite', delete=F
 _TMP.close()
 os.environ['DATABASE_URL'] = 'sqlite:///' + _TMP.name
 os.environ['TEAM_PASSWORD'] = 'test-pass'
+os.environ['ALLOW_TEAM_PASSWORD'] = '1'
 os.environ['INGEST_TOKEN'] = 'test-token'
 os.environ['SECRET_KEY'] = 'test-secret'
 os.environ.pop('RENDER', None)
@@ -40,6 +41,7 @@ LEG = {
 
 class IngestTests(unittest.TestCase):
     def setUp(self):
+        os.environ['ALLOW_TEAM_PASSWORD'] = '1'
         server.store.clear()
         self.client = server.app.test_client()
 

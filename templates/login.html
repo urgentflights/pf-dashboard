@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>PF Dashboard</title>
+  <title>Sign in · PF Dashboard</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -13,20 +13,41 @@
     <form class="login" method="post" action="/login">
       <p class="mark" aria-hidden="true">PF</p>
       <h1>PF Dashboard</h1>
-      <p class="lede">ParaFlight Aero. Sign in with the team password. Your name is stamped on every edit.</p>
+      <p class="lede">ParaFlight Aero. Sign in with your work email. Your name is stamped on every edit.</p>
+      {% if pending %}
+      <p class="form-note" role="status">Your account is waiting for admin approval. You can sign in once an admin approves it.</p>
+      {% endif %}
+      {% if ready %}
+      <p class="form-ok" role="status">Your account is ready. Sign in with your email and password.</p>
+      {% endif %}
       {% if error %}
       <p class="form-error" role="alert">{{ error }}</p>
       {% endif %}
       <label>
+        Email
+        <input name="email" type="email" required maxlength="254" autocomplete="username" value="{{ email or '' }}" autofocus>
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" required autocomplete="current-password">
+      </label>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="form-links">Need an account? <a href="/signup">Sign up</a></p>
+    </form>
+    {% if allow_team %}
+    <form class="login team-fallback" method="post" action="/login">
+      <p class="lede">Shared team password (temporary fallback)</p>
+      <label>
         Your name
-        <input name="name" required maxlength="40" autocomplete="nickname" value="{{ name or '' }}" autofocus>
+        <input name="name" required maxlength="40" autocomplete="nickname" value="{{ name or '' }}">
       </label>
       <label>
         Team password
         <input name="password" type="password" required autocomplete="current-password">
       </label>
-      <button class="primary" type="submit">Sign in</button>
+      <button class="primary" type="submit">Sign in with team password</button>
     </form>
+    {% endif %}
   </main>
 </body>
 </html>

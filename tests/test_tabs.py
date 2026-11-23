@@ -14,6 +14,7 @@ if 'server' not in sys.modules:
     handle.close()
     os.environ['DATABASE_URL'] = 'sqlite:///' + handle.name
     os.environ.setdefault('TEAM_PASSWORD', 'test-pass')
+    os.environ['ALLOW_TEAM_PASSWORD'] = '1'
     os.environ.setdefault('INGEST_TOKEN', 'test-token')
     os.environ.setdefault('SECRET_KEY', 'test-secret')
     os.environ.pop('RENDER', None)
@@ -89,6 +90,7 @@ class WeekMonthHelpers(unittest.TestCase):
 
 class TabPageTests(unittest.TestCase):
     def setUp(self):
+        os.environ['ALLOW_TEAM_PASSWORD'] = '1'
         server.store.clear()
         self.client = server.app.test_client()
 

@@ -12,16 +12,17 @@ Do not commit operational move logs. The sample CSV that shaped the columns stay
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export TEAM_PASSWORD='choose-a-password'
 export INGEST_TOKEN='choose-a-token'
 export SECRET_KEY='choose-a-secret'
+# Optional: first sign-up with this email becomes admin if none exists yet.
+export ADMIN_EMAIL='Sim@paraflight.aero'
 python3 server.py
 ```
 
 Open http://localhost:10000 . The process listens on `0.0.0.0` and `$PORT` (default `10000`).
 
 ```bash
-python3 -m unittest tests.test_ingest -v
+python3 -m unittest tests.test_ingest tests.test_tabs tests.test_auth -v
 ```
 
 ## Environment variables
@@ -29,15 +30,17 @@ python3 -m unittest tests.test_ingest -v
 | Variable | Where it comes from | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Render Blueprint `fromDatabase` (`connectionString`). Unset locally. | Postgres URL. A `postgres://` or `postgresql://` URL uses Postgres (TLS when the host is external). Unset, or a `sqlite:///` URL, uses SQLite at `data/pf.sqlite`. |
-| `TEAM_PASSWORD` | You type it in the Dashboard when the Blueprint is first created (`sync: false`). | Shared team password for the login page. |
-| `INGEST_TOKEN` | Render generates it (`generateValue`). Copy it from the service Environment tab. | Bearer token for the ingest API. |
+| `ADMIN_EMAIL` | Set on the service (`Sim@paraflight.aero`). | If no admin exists yet, a sign-up with this email (case-insensitive) is activated as admin. |
+| `ALLOW_TEAM_PASSWORD` | Defaults to off. | When `true`/`1`/`on`, the old shared `TEAM_PASSWORD` login still works as a fallback. Leave it off in production. |
+| `TEAM_PASSWORD` | You type it in the Dashboard when the Blueprint is first created (`sync: false`). | Used only when `ALLOW_TEAM_PASSWORD` is on. |
+| `INGEST_TOKEN` | Render generates it (`generateValue`). Copy it from the service Environment tab. | Bearer token for the ingest API and `POST /api/admin/bootstrap`. |
 | `SECRET_KEY` | Render generates it (`generateValue`). | Signs the session cookie. |
 | `PORT` | Set by Render. | HTTP port. |
 | `RENDER` | Set by Render to `true`. | Marks the session cookie Secure. |
 
 Leave `DATABASE_URL` unset on a laptop. The Render database allow list is empty, so only services on Render's private network can open it. The web service uses the internal connection string.
 
-If `TEAM_PASSWORD` is unset, the login page explains that and will not sign anyone in. If `INGEST_TOKEN` is unset, ingest returns 401.
+Shared team-password login is off unless `ALLOW_TEAM_PASSWORD` is set. If `INGEST_TOKEN` is unset, ingest and bootstrap return 401.
 
 ## What the board shows
 
@@ -70,9 +73,15 @@ Direct links: `/#nkr` and `/#history`.
 
 ## Auth
 
-`GET /login` and `GET /healthz` are public. Everything else needs a session cookie from `POST /login` with form fields `name` and `password`. `name` is the display name stamped on edits (trimmed, required, 40 characters). The cookie is `pf_session`, HttpOnly, SameSite=Lax, and lasts 30 days. On Render it is Secure.
+Staff create their own accounts at `/signup` (name, email, password, confirm). New accounts stay `pending` until an admin approves them, then they sign in at `/login` with email and password. Pending and disabled accounts cannot sign in. The first sign-up whose email matches `ADMIN_EMAIL` (case-insensitive) is activated as admin if no admin exists yet.
 
-Eight wrong passwords from the same address within ten minutes return 429.
+Admins use `/admin` to list accounts, approve, disable or re-enable, promote or demote, delete pending sign-ups, and create a one-time password-reset link (valid 7 days) to copy and send. `/setup?token=...` sets a new password from that link and cannot be reused.
+
+`POST /api/admin/bootstrap` is authorized with `Authorization: Bearer $INGEST_TOKEN`. The JSON body is `{"email": "..."}`. If that user already exists, they are promoted to an active admin and the response is `{"ok": true, "email": "...", "role": "admin", "status": "active"}`. If not, the response is `404` `{"ok": false, "error": "not_found"}`. It does not create accounts or password-setup links.
+
+`GET /login`, `GET /signup`, `GET /setup`, and `GET /healthz` are public. Everything else needs a session cookie. The cookie is `pf_session`, signed with the user id, HttpOnly, SameSite=Lax, and lasts 30 days. On Render it is Secure. Form posts also check the Origin or Referer against the same host. Edits are still stamped with the signed-in user's name.
+
+Eight wrong login or sign-up attempts from the same address within ten minutes return 429.
 
 `POST /logout` clears the cookie.
 
@@ -247,7 +256,7 @@ Free Postgres expires 30 days after it is created, and backups go with it. Befor
 After this file is on `main`:
 
 1. Open https://dashboard.render.com/blueprint/new?repo=https://github.com/urgentflights/pf-dashboard
-2. Set `TEAM_PASSWORD` when prompted. Render fills `INGEST_TOKEN` and `SECRET_KEY`.
+2. Set `TEAM_PASSWORD` when prompted (kept only as a disabled fallback). Set `ADMIN_EMAIL` to the first admin's email. Render fills `INGEST_TOKEN` and `SECRET_KEY`.
 3. Apply, then copy `INGEST_TOKEN` from the service Environment tab for the automation.
 
 The service does not spin down on the starter plan. The filesystem is ephemeral; the SQLite fallback is only for local runs.

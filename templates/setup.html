@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Set password · PF Dashboard</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <form class="login" method="post" action="/setup">
+      <p class="mark" aria-hidden="true">PF</p>
+      <h1>Set your password</h1>
+      {% if not valid %}
+      <p class="form-error" role="alert">{{ error or 'This setup link is invalid or has expired.' }}</p>
+      <p class="form-links"><a href="/login">Back to sign in</a></p>
+      {% else %}
+      <p class="lede">Choose a new password for your PF Dashboard account. This link can be used once.</p>
+      {% if error %}
+      <p class="form-error" role="alert">{{ error }}</p>
+      {% endif %}
+      <input type="hidden" name="token" value="{{ token }}">
+      <label>
+        New password
+        <input name="password" type="password" required minlength="8" maxlength="200" autocomplete="new-password" autofocus>
+      </label>
+      <label>
+        Confirm password
+        <input name="confirm" type="password" required minlength="8" maxlength="200" autocomplete="new-password">
+      </label>
+      <button class="primary" type="submit">Save password</button>
+      <p class="form-links"><a href="/login">Back to sign in</a></p>
+      {% endif %}
+    </form>
+  </main>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin · PF Dashboard</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">PF</span>
+      <div>
+        <h1>Staff accounts</h1>
+        <p>ParaFlight Aero · approve and manage access</p>
+      </div>
+    </div>
+    <div class="session">
+      <span class="whoami">{{ name }}</span>
+      <a class="ghost link" href="/">Board</a>
+      <form method="post" action="/logout">
+        <button class="ghost" type="submit">Log out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% if forbidden %}
+    <p class="form-error" role="alert">Admin only.</p>
+    <p class="form-links"><a href="/">Back to the board</a></p>
+    {% else %}
+    {% if error %}
+    <p class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
+    {% if message %}
+    <p class="form-ok" role="status">{{ message }}</p>
+    {% endif %}
+    {% if reset_link %}
+    <div class="token-box">
+      <label>
+        One-time password reset link
+        <input id="reset-link" type="text" readonly value="{{ reset_link }}">
+      </label>
+      <button type="button" class="ghost" id="copy-link">Copy link</button>
+    </div>
+    {% endif %}
+
+    <div class="table-wrap">
+      <table class="moves users">
+        <caption class="sr">Staff accounts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Email</th>
+            <th scope="col">Role</th>
+            <th scope="col">Status</th>
+            <th scope="col">Created</th>
+            <th scope="col">Last sign-in</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <td>{{ user.name }}</td>
+            <td>{{ user.email }}</td>
+            <td>{{ user.role }}</td>
+            <td><span class="status-pill status-{{ user.status }}">{{ user.status }}</span></td>
+            <td>{{ user.created_at or '—' }}</td>
+            <td>{{ user.last_login or '—' }}</td>
+            <td>
+              <div class="admin-actions">
+                {% if user.status == 'pending' %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="approve">
+                  <button class="primary" type="submit">Approve</button>
+                </form>
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="delete">
+                  <button class="ghost" type="submit">Delete</button>
+                </form>
+                {% endif %}
+                {% if user.status == 'active' %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="disable">
+                  <button class="ghost" type="submit">Disable</button>
+                </form>
+                {% if user.role != 'admin' %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="promote">
+                  <button class="ghost" type="submit">Make admin</button>
+                </form>
+                {% else %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="demote">
+                  <button class="ghost" type="submit">Make staff</button>
+                </form>
+                {% endif %}
+                {% endif %}
+                {% if user.status == 'disabled' %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="enable">
+                  <button class="primary" type="submit">Re-enable</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/admin">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="hidden" name="action" value="reset">
+                  <button class="ghost" type="submit">Reset password</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7">No accounts yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    <p class="foot">Internal · ParaFlight Aero · share the sign-up link with staff, then approve them here</p>
+  </main>
+  <script>
+    const button = document.getElementById('copy-link');
+    const field = document.getElementById('reset-link');
+    if (button && field) {
+      button.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(field.value);
+          button.textContent = 'Copied';
+        } catch (err) {
+          field.select();
+          document.execCommand('copy');
+          button.textContent = 'Copied';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
