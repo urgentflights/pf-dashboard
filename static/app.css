@@ -276,13 +276,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .who.alarm { background: #ffedd5; }
 .who.alarm .name { color: #9a3412; }
 
-.tail, .phone, .notes, .air, .stamp { margin: 0; font-size: 0.92rem; }
+.tail, .phone, .notes, .air, .flight, .stamp { margin: 0; font-size: 0.92rem; }
 
 .phone a { color: var(--navy); }
 
 .notes { white-space: pre-wrap; }
 
 .air, .stamp, .notes { color: #334155; }
+
+.flight {
+  color: var(--ink);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
 
 .actions { display: flex; }
 

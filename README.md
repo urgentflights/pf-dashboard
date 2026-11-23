@@ -49,11 +49,13 @@ Summary tiles, counted across the whole log (filters do not change them):
 - **Next 3 days** — tomorrow through three days out, status not Removed. Today is not included.
 - **Unassigned** — method is OBC (`CommObc`) or Charter, nobody in `assigned_to`, status is not Completed or Removed, and the pickup date is today or later (or missing).
 
-Click a tile to show just that set. Type chips, status chips, and the search box narrow the list further. Search checks the swap id, centers, method, times, status, crew, aircraft, phone, notes, and Airspace fields.
+Click a tile to show just that set. Type chips, status chips, and the search box narrow the list further. Search checks the swap id, centers, method, times, status, crew, aircraft, phone, notes, airline, flight number, departure time, airport, terminal, and Airspace fields.
+
+Commercial and OBC cards show a compact flight line: airline, flight number, departure airport and terminal, and departure time, for example `AA 1234 · JFK T8 · Dep 6:15 AM`. If those fields are empty the line reads `Flight TBD`.
 
 OBC and Charter legs with nobody assigned are marked with an amber **Unassigned** line, including in history, unless the leg is Removed. Commercial, Ground, and Internal legs with nobody named are not flagged.
 
-Edit writes `assigned_to`, `aircraft`, `phone`, and `notes`, and stamps `edited_by` / `edited_at`. The board refreshes about once a minute, and waits while an edit is open.
+Edit writes `assigned_to`, `aircraft`, `phone`, `notes`, `airline`, `flight_number`, `departure_time`, `departure_airport`, and `departure_terminal`, and stamps `edited_by` / `edited_at`. The board refreshes about once a minute, and waits while an edit is open.
 
 ## Auth
 
@@ -71,7 +73,7 @@ Times and dates are strings. Empty columns are JSON `null`. The server never del
 
 Sending a key updates that column. Omitting a key leaves the column alone. A present `null` or blank string clears the column, with one exception: once `first_seen` is non-empty, ingest will not replace it or clear it.
 
-A moves payload cannot change team fields or Airspace fields. An Airspace payload cannot change logistics fields or team fields. On the Airspace endpoint only, `status` means the Airspace status text.
+A moves payload cannot change crew fields (`assigned_to`, `aircraft`, `phone`, `notes`) or Airspace fields. An Airspace payload cannot change logistics fields or crew fields. Airline, flight number, departure time, airport, and terminal are team-editable; both ingest endpoints may set them only when the stored value is empty, and never overwrite a value the team typed. On the Airspace endpoint only, `status` means the Airspace status text. If Airspace sends a combined flight string such as `AA 1234` or `AA1234` for a Commercial or OBC leg, and those fields are empty, the airline code and number are stored separately (the original string still goes in `airspace_flight`).
 
 `swap_id` is required, at most 80 characters, and may not contain control characters. Other text is trimmed and truncated to a column cap (centers 120, notes 4000, driver names 200, the rest 40–80). A list of driver names is joined with `, `.
 
@@ -95,6 +97,11 @@ Accepted keys (CSV names, plus aliases):
 | `status` | `status` (`Scheduled`, `Completed`, `Removed`, or anything else) |
 | `first_seen` | `first_seen` |
 | `last_seen` | `last_seen` |
+| `airline` | `airline` (filled only when empty) |
+| `flight_number`, `flight` | `flight_number` (filled only when empty; combined strings like `AA 1234` are split) |
+| `departure_time`, `etd`, `dep_time` | `departure_time` (filled only when empty) |
+| `departure_airport`, `airport`, `origin_airport` | `departure_airport` (filled only when empty) |
+| `departure_terminal`, `terminal` | `departure_terminal` (filled only when empty) |
 
 ```bash
 curl -sS -X POST "$BASE/api/ingest/moves" \
@@ -131,7 +138,11 @@ Same auth, envelopes, and response shape. Upsert by `swap_id`. If the leg does n
 | `swap_id` | `swap_id` |
 | `airspace_order_id`, `order_id` | `airspace_order_id` |
 | `airspace_driver`, `driver_names`, `drivers`, `driver_name`, `driver` | `airspace_driver` |
-| `airspace_flight`, `flight_number`, `flight` | `airspace_flight` |
+| `airspace_flight`, `flight_number`, `flight` | `airspace_flight`. For a Commercial or OBC leg, also fills `flight_number` (and `airline` when the string is like `AA 1234` or `AA1234`) if those columns are empty |
+| `airline` | `airline` (filled only when empty) |
+| `departure_time`, `etd`, `dep_time` | `departure_time` (filled only when empty) |
+| `airport`, `departure_airport`, `origin_airport` | `departure_airport` (filled only when empty) |
+| `terminal`, `departure_terminal` | `departure_terminal` (filled only when empty) |
 | `airspace_awb`, `awb` | `airspace_awb` |
 | `airspace_status`, `status` | `airspace_status` |
 
@@ -169,6 +180,11 @@ Session cookie. Returns every leg.
       "status": "Scheduled",
       "first_seen": "2026-11-20",
       "last_seen": "2026-11-22",
+      "airline": "DL",
+      "flight_number": "1842",
+      "departure_time": "2026-11-24T06:15",
+      "departure_airport": "MSP",
+      "departure_terminal": "1",
       "airspace_order_id": "AS-100",
       "airspace_driver": "Sam Ruiz, Jo Park",
       "airspace_flight": "DL 1842",
@@ -189,7 +205,7 @@ Order is `pickup_date`, then `swap_id`. Missing dates sort last. `401` when the 
 
 ### `PATCH /api/moves`
 
-Session cookie. JSON object. `swap_id` plus at least one of `assigned_to`, `aircraft` (`tail` and `aircraft_tail` are aliases), `phone` (`contact`, `phone_contact`), `notes`. Blank clears a field. Sets `edited_by` from the login name and `edited_at` to UTC `YYYY-MM-DDTHH:MM:SSZ`.
+Session cookie. JSON object. `swap_id` plus at least one of `assigned_to`, `aircraft` (`tail` and `aircraft_tail` are aliases), `phone` (`contact`, `phone_contact`), `notes`, `airline`, `flight_number` (`flight` is an alias), `departure_time` (`etd`, `dep_time`), `departure_airport` (`airport`, `origin_airport`), `departure_terminal` (`terminal`). Blank clears a field. Sets `edited_by` from the login name and `edited_at` to UTC `YYYY-MM-DDTHH:MM:SSZ`.
 
 ```bash
 curl -sS -X PATCH "$BASE/api/moves" \

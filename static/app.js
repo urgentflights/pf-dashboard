@@ -90,7 +90,9 @@
     return [
       move.swap_id, move.donor, move.recipient, move.method, methodLabel(move.method),
       move.pickup, move.delivery, move.status, move.assigned_to, move.aircraft, move.phone,
-      move.notes, move.airspace_driver, move.airspace_flight, move.airspace_awb,
+      move.notes, move.airline, move.flight_number, move.departure_time,
+      move.departure_airport, move.departure_terminal,
+      move.airspace_driver, move.airspace_flight, move.airspace_awb,
       move.airspace_order_id, move.airspace_status,
     ].map(function (value) { return String(value || '').toLowerCase(); }).join('\n');
   }
@@ -193,6 +195,10 @@
       timeRow('Delivery', move.delivery),
     ]));
 
+    if (isCommercialFlight(move)) {
+      node.append(el('p', { class: 'flight', text: flightLine(move) }));
+    }
+
     const whoClass = needsCrew(move) ? 'who alarm' : 'who';
     const whoName = !isBlank(move.assigned_to) ? move.assigned_to : (needsCrew(move) ? 'Unassigned' : '—');
     const who = el('div', { class: whoClass }, [
@@ -226,6 +232,58 @@
     ]);
   }
 
+  function isCommercialFlight(move) {
+    const label = methodLabel(move.method);
+    return label === 'Commercial' || label === 'OBC';
+  }
+
+  function formatDepTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    let match = raw.match(/(?:T|\s)(\d{1,2}):(\d{2})(?::\d{2})?/);
+    let hour;
+    let minute;
+    let ampm = null;
+    if (match) {
+      hour = Number(match[1]);
+      minute = match[2];
+    } else {
+      match = raw.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?/);
+      if (!match) return 'Dep ' + raw;
+      hour = Number(match[1]);
+      minute = match[2];
+      ampm = match[3] ? match[3].toUpperCase() : null;
+    }
+    if (ampm) {
+      return 'Dep ' + (hour % 12 || 12) + ':' + minute + ' ' + ampm;
+    }
+    const suffix = hour >= 12 ? 'PM' : 'AM';
+    return 'Dep ' + (hour % 12 || 12) + ':' + minute + ' ' + suffix;
+  }
+
+  function formatAirport(airport, terminal) {
+    const place = String(airport || '').trim();
+    let gate = String(terminal || '').trim();
+    if (gate && /^\d+[A-Za-z]?$/.test(gate)) gate = 'T' + gate;
+    return [place, gate].filter(Boolean).join(' ');
+  }
+
+  function flightLine(move) {
+    const airline = String(move.airline || '').trim();
+    const number = String(move.flight_number || '').trim();
+    let flight = [airline, number].filter(Boolean).join(' ');
+    if (airline && number && number.toUpperCase().indexOf(airline.toUpperCase()) === 0) {
+      flight = number;
+    }
+    if (!flight) flight = 'Flight TBD';
+    const bits = [flight];
+    const place = formatAirport(move.departure_airport, move.departure_terminal);
+    if (place) bits.push(place);
+    const dep = formatDepTime(move.departure_time);
+    if (dep) bits.push(dep);
+    return bits.join(' · ');
+  }
+
   function airLine(move) {
     const bits = [];
     if (move.airspace_driver) bits.push(move.airspace_driver);
@@ -243,6 +301,11 @@
       field('Assigned to', 'assigned_to', move.assigned_to, 'Who is on this trip', 120),
       field('Aircraft / tail', 'aircraft', move.aircraft, 'Tail for a charter', 40),
       field('Phone', 'phone', move.phone, 'Contact number', 40),
+      field('Airline', 'airline', move.airline, 'AA, Delta…', 40),
+      field('Flight number', 'flight_number', move.flight_number, '1234', 40),
+      field('Departure time', 'departure_time', move.departure_time, '6:15 AM or 2026-11-24T06:15', 80),
+      field('Departure airport', 'departure_airport', move.departure_airport, 'JFK', 40),
+      field('Departure terminal', 'departure_terminal', move.departure_terminal, 'T8', 40),
       noteField(move.notes),
     );
     const actions = el('div', { class: 'editor-actions' }, [
@@ -361,7 +424,8 @@
 
   async function save(form, id) {
     const body = { swap_id: id };
-    ['assigned_to', 'aircraft', 'phone', 'notes'].forEach(function (name) {
+    ['assigned_to', 'aircraft', 'phone', 'airline', 'flight_number',
+      'departure_time', 'departure_airport', 'departure_terminal', 'notes'].forEach(function (name) {
       body[name] = form.querySelector('[name="' + name + '"]').value;
     });
     const button = form.querySelector('button[type=submit]');

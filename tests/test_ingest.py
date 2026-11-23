@@ -227,6 +227,162 @@ class IngestTests(unittest.TestCase):
         empty = self.client.patch('/api/moves', json={'swap_id': '11593/1/1'})
         self.assertEqual(empty.status_code, 400)
 
+    def test_flight_fields_fill_when_empty_and_team_values_survive(self):
+        self.login('Alex')
+        created = self.ingest([{
+            **LEG,
+            'airline': 'UA',
+            'flight_number': '441',
+            'departure_time': '2026-11-24T06:15',
+            'departure_airport': 'MSP',
+            'departure_terminal': '1',
+        }])
+        self.assertEqual(created.get_json()['inserted'], 1)
+        row = self.moves()[0]
+        self.assertEqual(row['airline'], 'UA')
+        self.assertEqual(row['flight_number'], '441')
+        self.assertEqual(row['departure_time'], '2026-11-24T06:15')
+        self.assertEqual(row['departure_airport'], 'MSP')
+        self.assertEqual(row['departure_terminal'], '1')
+
+        # A later moves ingest must not overwrite filled commercial fields,
+        # including when the payload uses aliases.
+        again = self.ingest([{
+            **LEG,
+            'airline': 'DL',
+            'flight': 'DL 99',
+            'etd': '09:00',
+            'airport': 'DTW',
+            'terminal': 'EM',
+        }])
+        self.assertEqual(again.get_json()['updated'], 1)
+        row = self.moves()[0]
+        self.assertEqual(row['airline'], 'UA')
+        self.assertEqual(row['flight_number'], '441')
+        self.assertEqual(row['departure_time'], '2026-11-24T06:15')
+        self.assertEqual(row['departure_airport'], 'MSP')
+        self.assertEqual(row['departure_terminal'], '1')
+
+        # Empty leftover fields on another leg can still be filled from Airspace.
+        self.ingest([{
+            'swap_id': '11600/1/1',
+            'pickup_date': '2026-11-25',
+            'method': 'Commercial',
+            'donor': 'JHU',
+            'recipient': 'NYU',
+            'status': 'Scheduled',
+        }])
+        split = self.air([{
+            'swap_id': '11600/1/1',
+            'flight': 'AA1234',
+            'etd': '6:15 AM',
+            'origin_airport': 'JFK',
+            'terminal': '8',
+        }])
+        self.assertEqual(split.get_json()['updated'], 1)
+        commercial = next(item for item in self.moves() if item['swap_id'] == '11600/1/1')
+        self.assertEqual(commercial['airspace_flight'], 'AA1234')
+        self.assertEqual(commercial['airline'], 'AA')
+        self.assertEqual(commercial['flight_number'], '1234')
+        self.assertEqual(commercial['departure_time'], '6:15 AM')
+        self.assertEqual(commercial['departure_airport'], 'JFK')
+        self.assertEqual(commercial['departure_terminal'], '8')
+
+        spaced = self.air([{
+            'swap_id': '11600/1/1',
+            'flight_number': 'AA 9999',
+            'departure_time': 'noon',
+            'airport': 'LGA',
+            'departure_terminal': 'B',
+        }])
+        self.assertEqual(spaced.get_json()['updated'], 1)
+        commercial = next(item for item in self.moves() if item['swap_id'] == '11600/1/1')
+        self.assertEqual(commercial['airspace_flight'], 'AA 9999')
+        self.assertEqual(commercial['airline'], 'AA')
+        self.assertEqual(commercial['flight_number'], '1234')
+        self.assertEqual(commercial['departure_time'], '6:15 AM')
+        self.assertEqual(commercial['departure_airport'], 'JFK')
+        self.assertEqual(commercial['departure_terminal'], '8')
+
+        edited = self.client.patch('/api/moves', json={
+            'swap_id': '11600/1/1',
+            'airline': 'JetBlue',
+            'flight_number': '615',
+            'departure_time': '7:05 AM',
+            'departure_airport': 'JFK',
+            'departure_terminal': 'T5',
+        })
+        self.assertEqual(edited.status_code, 200)
+        move = edited.get_json()['move']
+        self.assertEqual(move['airline'], 'JetBlue')
+        self.assertEqual(move['flight_number'], '615')
+        self.assertEqual(move['departure_time'], '7:05 AM')
+        self.assertEqual(move['departure_airport'], 'JFK')
+        self.assertEqual(move['departure_terminal'], 'T5')
+        self.assertEqual(move['edited_by'], 'Alex')
+        self.assertTrue(move['edited_at'])
+
+        # Ingest after a team edit still leaves the typed values alone.
+        self.air([{
+            'swap_id': '11600/1/1',
+            'airline': 'AA',
+            'flight': 'AA 1',
+            'etd': '1:00 AM',
+            'airport': 'EWR',
+            'terminal': 'C',
+        }])
+        commercial = next(item for item in self.moves() if item['swap_id'] == '11600/1/1')
+        self.assertEqual(commercial['airline'], 'JetBlue')
+        self.assertEqual(commercial['flight_number'], '615')
+        self.assertEqual(commercial['departure_time'], '7:05 AM')
+        self.assertEqual(commercial['departure_airport'], 'JFK')
+        self.assertEqual(commercial['departure_terminal'], 'T5')
+
+        exported = self.client.get('/api/moves.csv')
+        self.assertEqual(exported.status_code, 200)
+        rows = list(csv.DictReader(io.StringIO(exported.data.decode('utf-8-sig'))))
+        self.assertIn('airline', rows[0])
+        self.assertIn('flight_number', rows[0])
+        self.assertIn('departure_time', rows[0])
+        self.assertIn('departure_airport', rows[0])
+        self.assertIn('departure_terminal', rows[0])
+        match = next(row for row in rows if row['swap_id'] == '11600/1/1')
+        self.assertEqual(match['airline'], 'JetBlue')
+        self.assertEqual(match['flight_number'], '615')
+        self.assertEqual(match['departure_airport'], 'JFK')
+        self.assertEqual(match['departure_terminal'], 'T5')
+
+    def test_migrates_existing_sqlite_schema(self):
+        import sqlite3
+        import tempfile
+        from store import Store
+
+        handle = tempfile.NamedTemporaryFile(prefix='pf-old-', suffix='.sqlite', delete=False)
+        handle.close()
+        conn = sqlite3.connect(handle.name)
+        conn.execute(
+            "CREATE TABLE moves (swap_id TEXT PRIMARY KEY, method TEXT, assigned_to TEXT)"
+        )
+        conn.execute("INSERT INTO moves (swap_id, method) VALUES ('1/1/1', 'Commercial')")
+        conn.commit()
+        conn.close()
+
+        legacy = Store()
+        legacy.init('sqlite:///' + handle.name)
+        try:
+            row = legacy.get('1/1/1')
+            self.assertEqual(row['method'], 'Commercial')
+            self.assertIsNone(row['airline'])
+            self.assertIsNone(row['departure_airport'])
+            names = set(legacy._column_names())
+            for column in (
+                'airline', 'flight_number', 'departure_time',
+                'departure_airport', 'departure_terminal',
+            ):
+                self.assertIn(column, names)
+        finally:
+            legacy.close()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -23,7 +23,7 @@ from flask import (
 )
 
 import store as store_mod
-from store import FIELDS, TEAM, store
+from store import EDITABLE, FIELDS, store
 
 _FAILS = {}
 _FAIL_WINDOW = 600
@@ -158,7 +158,7 @@ def create_app():
         swap_id, err = store_mod.clean_swap_id(payload.get('swap_id'))
         if err:
             return jsonify(error=err), 400
-        if not any(key in parsed for key in TEAM):
+        if not any(key in parsed for key in EDITABLE):
             return jsonify(error='no team fields'), 400
         move = store.update_team(swap_id, parsed, session['display_name'])
         if move is None:

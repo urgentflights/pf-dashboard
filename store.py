@@ -2,10 +2,13 @@
 
 Render sets DATABASE_URL to Postgres. With no DATABASE_URL, or a sqlite:// URL,
 the app uses a local SQLite file so it can run on a laptop. Ingest updates
-logistics columns only. Team-edited columns are never written by ingest.
+logistics columns only. Crew columns (assigned_to, aircraft, phone, notes)
+are never written by ingest. Airline, flight number, departure time, airport,
+and terminal are team-editable; ingest may fill them only when empty.
 """
 
 import os
+import re
 import ssl
 import threading
 import urllib.parse
@@ -17,6 +20,7 @@ NY = ZoneInfo('America/New_York')
 FIELDS = (
     'swap_id', 'pickup_date', 'donor', 'recipient', 'method', 'pickup', 'delivery',
     'status', 'first_seen', 'last_seen',
+    'airline', 'flight_number', 'departure_time', 'departure_airport', 'departure_terminal',
     'airspace_order_id', 'airspace_driver', 'airspace_flight', 'airspace_awb', 'airspace_status',
     'assigned_to', 'aircraft', 'phone', 'notes', 'edited_by', 'edited_at',
 )
@@ -30,7 +34,13 @@ AIRSPACE = (
     'airspace_order_id', 'airspace_driver', 'airspace_flight', 'airspace_awb', 'airspace_status',
 )
 
+FILLABLE = (
+    'airline', 'flight_number', 'departure_time', 'departure_airport', 'departure_terminal',
+)
+
 TEAM = ('assigned_to', 'aircraft', 'phone', 'notes')
+
+EDITABLE = TEAM + FILLABLE
 
 _LIMITS = {
     'swap_id': 80,
@@ -48,6 +58,11 @@ _LIMITS = {
     'airspace_flight': 40,
     'airspace_awb': 40,
     'airspace_status': 300,
+    'airline': 40,
+    'flight_number': 40,
+    'departure_time': 80,
+    'departure_airport': 40,
+    'departure_terminal': 40,
     'assigned_to': 120,
     'aircraft': 40,
     'phone': 40,
@@ -87,6 +102,29 @@ _AIR_ALIASES = (
     ('awb', 'airspace_awb'),
     ('airspace_status', 'airspace_status'),
     ('status', 'airspace_status'),
+    ('airline', 'airline'),
+    ('departure_time', 'departure_time'),
+    ('etd', 'departure_time'),
+    ('dep_time', 'departure_time'),
+    ('departure_airport', 'departure_airport'),
+    ('airport', 'departure_airport'),
+    ('origin_airport', 'departure_airport'),
+    ('departure_terminal', 'departure_terminal'),
+    ('terminal', 'departure_terminal'),
+)
+
+_FILLABLE_ALIASES = (
+    ('airline', 'airline'),
+    ('flight_number', 'flight_number'),
+    ('flight', 'flight_number'),
+    ('departure_time', 'departure_time'),
+    ('etd', 'departure_time'),
+    ('dep_time', 'departure_time'),
+    ('departure_airport', 'departure_airport'),
+    ('airport', 'departure_airport'),
+    ('origin_airport', 'departure_airport'),
+    ('departure_terminal', 'departure_terminal'),
+    ('terminal', 'departure_terminal'),
 )
 
 _TEAM_ALIASES = (
@@ -98,7 +136,7 @@ _TEAM_ALIASES = (
     ('contact', 'phone'),
     ('phone_contact', 'phone'),
     ('notes', 'notes'),
-)
+) + _FILLABLE_ALIASES
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SQLITE = os.path.join(ROOT, 'data', 'pf.sqlite')
@@ -115,6 +153,11 @@ CREATE TABLE IF NOT EXISTS moves (
     status TEXT,
     first_seen TEXT,
     last_seen TEXT,
+    airline TEXT,
+    flight_number TEXT,
+    departure_time TEXT,
+    departure_airport TEXT,
+    departure_terminal TEXT,
     airspace_order_id TEXT,
     airspace_driver TEXT,
     airspace_flight TEXT,
@@ -183,15 +226,69 @@ def _pick(row, aliases):
 
 
 def parse_move(row):
-    return _pick(row, _MOVE_ALIASES)
+    out = _pick(row, _MOVE_ALIASES)
+    for key, value in _pick(row, _FILLABLE_ALIASES).items():
+        if key not in out:
+            out[key] = value
+    return out
 
 
 def parse_airspace(row):
-    return _pick(row, _AIR_ALIASES)
+    out = _pick(row, _AIR_ALIASES)
+    for key, value in _pick(row, _FILLABLE_ALIASES).items():
+        if key not in out:
+            out[key] = value
+    return out
 
 
 def parse_team(row):
     return _pick(row, _TEAM_ALIASES)
+
+
+_FLIGHT_CODE_RE = re.compile(r'^([A-Za-z]{2,3})\s*(\d{1,4}[A-Za-z]?)$')
+_FLIGHT_NAMED_RE = re.compile(r'^([A-Za-z][A-Za-z. ]{1,28}?)\s+(\d{1,4}[A-Za-z]?)$')
+
+
+def split_flight(value):
+    """Return (airline, number) from strings like 'AA 1234' or 'AA1234'.
+
+    If the string cannot be split, both parts are None.
+    """
+    text = (value or '').strip()
+    if not text:
+        return None, None
+    match = _FLIGHT_CODE_RE.match(text)
+    if match:
+        return match.group(1).upper(), match.group(2)
+    match = _FLIGHT_NAMED_RE.match(text)
+    if match:
+        return match.group(1).strip(), match.group(2)
+    return None, None
+
+
+def is_commercial_method(method):
+    key = re.sub(r'[^a-z]', '', (method or '').lower())
+    if not key:
+        return True
+    return key in ('commercial', 'commobc', 'obc', 'onboardcourier')
+
+
+def enrich_fillable_from_flight(fields, method=None):
+    """Split a combined flight string into airline and flight_number in place."""
+    explicit = fields.get('flight_number')
+    source = explicit or (fields.get('airspace_flight') if is_commercial_method(method) else None)
+    airline, number = split_flight(source)
+    if not airline or not number:
+        if is_commercial_method(method) and not explicit and fields.get('airspace_flight') and 'flight_number' not in fields:
+            fields['flight_number'] = fields['airspace_flight']
+        return fields
+    if not fields.get('airline'):
+        fields['airline'] = airline
+    if explicit:
+        fields['flight_number'] = number
+    elif 'flight_number' not in fields or not fields.get('flight_number'):
+        fields['flight_number'] = number
+    return fields
 
 
 def clean_swap_id(value):
@@ -232,6 +329,7 @@ class Store:
             self._close()
             self._open()
             self._exec(_SCHEMA)
+            self._migrate()
             self.conn.commit()
 
     def describe(self):
@@ -280,7 +378,7 @@ class Store:
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         sets = []
         params = []
-        for key in TEAM:
+        for key in EDITABLE:
             if key not in fields:
                 continue
             sets.append(f'{key} = ?')
@@ -340,10 +438,12 @@ class Store:
         swap_id = fields['swap_id']
         existing_rows = self._exec('SELECT * FROM moves WHERE swap_id = ?', (swap_id,))
         existing = existing_rows[0] if existing_rows else None
+        method = (existing or {}).get('method') or fields.get('method')
+        enrich_fillable_from_flight(fields, method)
         if existing is None:
             cols = ['swap_id']
             vals = [swap_id]
-            for key in columns:
+            for key in list(columns) + list(FILLABLE):
                 if key not in fields or fields[key] is None:
                     continue
                 cols.append(key)
@@ -366,10 +466,35 @@ class Store:
                     continue
             sets.append(f'{key} = ?')
             params.append(fields[key])
+        # Ingest may fill commercial flight fields only when the stored value is empty.
+        for key in FILLABLE:
+            if key not in fields or not fields[key]:
+                continue
+            if existing.get(key):
+                continue
+            sets.append(f'{key} = ?')
+            params.append(fields[key])
         if sets:
             params.append(swap_id)
             self._exec(f'UPDATE moves SET {", ".join(sets)} WHERE swap_id = ?', params)
         return 'updated'
+
+    def _migrate(self):
+        existing = {name.lower() for name in self._column_names()}
+        for column in FIELDS:
+            if column.lower() in existing:
+                continue
+            self._exec(f'ALTER TABLE moves ADD COLUMN {column} TEXT')
+
+    def _column_names(self):
+        if self.kind == 'postgres':
+            rows = self._exec(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = 'moves'"
+            )
+            return [row['column_name'] for row in rows]
+        rows = self._exec('PRAGMA table_info(moves)')
+        return [row['name'] for row in rows]
 
     def _one(self, swap_id):
         cols = ', '.join(FIELDS)
@@ -380,6 +505,7 @@ class Store:
         if self.conn is None:
             self._open()
             self._exec(_SCHEMA)
+            self._migrate()
             self.conn.commit()
 
     def _open(self):
