@@ -1,8 +1,13 @@
 # PF Dashboard
 
-Dispatch board for ParaFlight Aero. One glance shows every upcoming and recent National Kidney Registry organ move, who is on the trip, and the Airspace driver or flight when automation has filled it in.
+ParaFlight Aero ops site. One login covers two dashboards:
 
-The app is a single Python process (`server.py`) with no build step. On Render it uses Postgres. On a laptop, with `DATABASE_URL` unset, it uses a local SQLite file.
+- **NKR Dashboard** (`/nkr`) — every upcoming and recent National Kidney Registry organ move, who is on the trip, and the Airspace driver or flight when automation has filled it in.
+- **PF Dashboard** (`/pf`) — other organ, air ambulance, and corporate trips entered by the team.
+
+After sign-in, `/` is a home switcher. The header shows **ParaFlight** and a switcher between the two dashboards.
+
+The app is a single Python process (`server.py`) with no build step. On Render it uses Postgres. On a laptop, with `DATABASE_URL` unset, it uses a local SQLite file. NKR moves and PF trips are stored in separate tables.
 
 Do not commit operational move logs. The sample CSV that shaped the columns stays out of this repo.
 
@@ -22,7 +27,7 @@ python3 server.py
 Open http://localhost:10000 . The process listens on `0.0.0.0` and `$PORT` (default `10000`).
 
 ```bash
-python3 -m unittest tests.test_ingest tests.test_tabs tests.test_auth -v
+python3 -m unittest tests.test_ingest tests.test_tabs tests.test_auth tests.test_trips -v
 ```
 
 ## Environment variables
@@ -42,7 +47,7 @@ Leave `DATABASE_URL` unset on a laptop. The Render database allow list is empty,
 
 Shared team-password login is off unless `ALLOW_TEAM_PASSWORD` is set. If `INGEST_TOKEN` is unset, ingest and bootstrap return 401.
 
-## What the board shows
+## NKR Dashboard
 
 The default view groups legs by `pickup_date` from today forward. Today is the calendar date in `America/New_York`, not the laptop's zone. Pickup and delivery times are shown as stored, including the zone abbreviation in the string. History shows earlier pickup dates. A leg with no pickup date stays on the upcoming board so it is not hidden.
 
@@ -60,15 +65,25 @@ OBC and Charter legs with nobody assigned are marked with an amber **Unassigned*
 
 Edit writes `assigned_to`, `aircraft`, `phone`, `notes`, `airline`, `flight_number`, `departure_time`, `departure_airport`, and `departure_terminal`, and stamps `edited_by` / `edited_at`. The board refreshes about once a minute, and waits while an edit is open.
 
-## Tabs
-
-The signed-in site has three tabs. The board is the default.
+The NKR Dashboard has three tabs. The board is the default.
 
 - **Board** — the dispatch cards described above. **Past dates** shows earlier pickup dates in the same card layout.
 - **NKR Moves** — a week-by-week table of current and upcoming moves (Sunday–Saturday in `America/New_York`), with counts by type for the selected week and month-by-month totals. Monthly totals count Completed and Scheduled legs and omit Removed, unless you turn on **Show removed**. Type is shown as OBC, not CommObc. Flight and who is assigned appear as columns when they are known.
 - **History** — completed moves, newest first, with Removed available through a status filter. Filter by month, type, and center, and search swap, flight, and names. Same columns as the NKR Moves table, including flight and who was assigned.
 
-Direct links: `/#nkr` and `/#history`.
+Direct links: `/nkr`, `/nkr#nkr`, and `/nkr#history`. The older `/#nkr` and `/#history` addresses redirect there.
+
+## PF Dashboard
+
+`/pf` is for trips that are not NKR moves: other organ work, air ambulance, and corporate. There is no ingest source yet. Any signed-in staff member can add, edit, or cancel a trip. Admins can delete one.
+
+The board groups upcoming and active trips (Quote, Booked, In progress) by date, with filters for trip type and a search box. Tiles count trips today, the next three days, and open quotes. Commercial and OBC cards use the same flight line as NKR (`AA 1234 · JFK T8 · Dep 6:15 AM`).
+
+**History** lists Completed and Cancelled trips, newest first, with search and filters by type and month, plus month-by-month totals by trip type.
+
+The add/edit form fields are: trip type (Organ, Air Ambulance, Corporate), client/customer, trip date, from, to, pickup time, delivery/arrival time, mode (Charter, Commercial, OBC, Ground), operator/aircraft (tail), crew/assigned to, airline, flight number, departure time, departure airport, terminal, status (Quote, Booked, In progress, Completed, Cancelled), phone, and a free-text notes field (no PHI-specific field names). `created_by` / `created_at` and `edited_by` / `edited_at` are stamped automatically.
+
+Export is `/api/trips.csv`.
 
 
 ## Auth
@@ -239,6 +254,30 @@ curl -sS -X PATCH "$BASE/api/moves" \
 ### `GET /api/moves.csv`
 
 Session cookie. All legs, same columns as the JSON object, header row, UTF-8 with BOM. `Content-Disposition: attachment; filename="moves.csv"`. Cells that start with `=`, `+`, `-`, or `@` are prefixed with a quote.
+
+### `GET /api/trips`
+
+Session cookie. `{"timezone":"America/New_York","today":"YYYY-MM-DD","trips":[...],"months":[...]}`. Each trip includes `id`, `trip_type`, `client`, `trip_date`, `origin`, `destination`, `pickup_time`, `delivery_time`, `mode`, `operator_aircraft`, `assigned_to`, `airline`, `flight_number`, `departure_time`, `departure_airport`, `departure_terminal`, `status`, `phone`, `notes`, `created_by`, `created_at`, `edited_by`, and `edited_at`. `months` are calendar-month totals by trip type for dated trips.
+
+### `POST /api/trips`
+
+Session cookie. JSON object. `trip_type` is required (`Organ`, `Air Ambulance`, or `Corporate`). Status defaults to `Quote`. `mode` if set must be `Charter`, `Commercial`, `OBC`, or `Ground`. `status` if set must be `Quote`, `Booked`, `In progress`, `Completed`, or `Cancelled`. `trip_date` if set must be `YYYY-MM-DD`.
+
+`201` `{"ok": true, "trip": { ... }}`. `400` `{"error": "..."}`.
+
+### `PATCH /api/trips/<id>`
+
+Session cookie. Partial update of the same fields. Used to edit or to cancel (`{"status":"Cancelled"}`).
+
+`200` `{"ok": true, "trip": { ... }}`. `404` `{"error": "unknown trip"}`.
+
+### `DELETE /api/trips/<id>`
+
+Session cookie, admin only. Permanently deletes the trip. `200` `{"ok": true}`. `403` `{"error": "forbidden"}`. `404` `{"error": "unknown trip"}`.
+
+### `GET /api/trips.csv`
+
+Session cookie. All trips, same columns as the JSON object, header row, UTF-8 with BOM. `Content-Disposition: attachment; filename="pf-trips.csv"`. Cells that start with `=`, `+`, `-`, or `@` are prefixed with a quote.
 
 ### `GET /healthz`
 

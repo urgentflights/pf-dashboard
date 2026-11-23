@@ -101,7 +101,7 @@ class TabPageTests(unittest.TestCase):
 
     def test_dashboard_has_three_tabs_and_board_is_default(self):
         self.login()
-        page = self.client.get('/')
+        page = self.client.get('/nkr')
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
         self.assertIn('id="tab-board"', html)
@@ -132,7 +132,7 @@ class TabPageTests(unittest.TestCase):
         body = js.get_data(as_text=True)
         self.assertIn('function renderNkr(', body)
         self.assertIn('function renderHistory(', body)
-        self.assertIn('Show removed', self.client.get('/').get_data(as_text=True))
+        self.assertIn('Show removed', self.client.get('/nkr').get_data(as_text=True))
         self.assertIn('weekStartSunday', body)
         self.assertIn("method_label('CommObc')" if False else 'function methodLabel', body)
         self.assertIn("'OBC'", body)
@@ -190,6 +190,21 @@ class TabPageTests(unittest.TestCase):
         self.assertEqual(november['OBC'], 1)
         self.assertEqual(november['Charter'], 0)
         self.assertEqual(november['total'], 2)
+
+    def test_home_is_switcher_and_hash_redirects_to_nkr(self):
+        self.login()
+        home = self.client.get('/')
+        self.assertEqual(home.status_code, 200)
+        html = home.get_data(as_text=True)
+        self.assertIn('NKR Dashboard', html)
+        self.assertIn('PF Dashboard', html)
+        self.assertIn('href="/nkr"', html)
+        self.assertIn('href="/pf"', html)
+        self.assertIn("location.replace('/nkr#'", html)
+        self.assertIn('ParaFlight', html)
+        # The NKR board itself lives at /nkr, not on the home switcher.
+        self.assertNotIn('id="tab-board"', html)
+        self.assertNotIn('id="nkr-table"', html)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,24 @@
+<header class="top">
+  <div class="brand">
+    <a class="brand-link" href="/">
+      <span class="mark" aria-hidden="true">PF</span>
+      <div>
+        <h1>ParaFlight</h1>
+        <p>{{ subtitle }}</p>
+      </div>
+    </a>
+  </div>
+  <nav class="dash-switch" aria-label="Dashboards">
+    <a href="/nkr" class="{% if current == 'nkr' %}is-current{% endif %}">NKR Dashboard</a>
+    <a href="/pf" class="{% if current == 'pf' %}is-current{% endif %}">PF Dashboard</a>
+  </nav>
+  <div class="session">
+    <span class="whoami">{{ name }}</span>
+    {% if is_admin %}
+    <a class="ghost link" href="/admin">Admin</a>
+    {% endif %}
+    <form method="post" action="/logout">
+      <button class="ghost" type="submit">Log out</button>
+    </form>
+  </div>
+</header>

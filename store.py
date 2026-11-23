@@ -1,10 +1,15 @@
-"""Move storage for PF Dashboard.
+"""Storage for ParaFlight ops dashboards.
 
 Render sets DATABASE_URL to Postgres. With no DATABASE_URL, or a sqlite:// URL,
-the app uses a local SQLite file so it can run on a laptop. Ingest updates
-logistics columns only. Crew columns (assigned_to, aircraft, phone, notes)
-are never written by ingest. Airline, flight number, departure time, airport,
-and terminal are team-editable; ingest may fill them only when empty.
+the app uses a local SQLite file so it can run on a laptop.
+
+NKR moves: ingest updates logistics columns only. Crew columns (assigned_to,
+aircraft, phone, notes) are never written by ingest. Airline, flight number,
+departure time, airport, and terminal are team-editable; ingest may fill them
+only when empty.
+
+PF trips: team-entered organ, air ambulance, and corporate trips in a separate
+table. There is no ingest source for these yet.
 """
 
 import hashlib
@@ -43,6 +48,91 @@ FILLABLE = (
 TEAM = ('assigned_to', 'aircraft', 'phone', 'notes')
 
 EDITABLE = TEAM + FILLABLE
+
+TRIP_TYPES = ('Organ', 'Air Ambulance', 'Corporate')
+TRIP_MODES = ('Charter', 'Commercial', 'OBC', 'Ground')
+TRIP_STATUSES = ('Quote', 'Booked', 'In progress', 'Completed', 'Cancelled')
+
+TRIP_FIELDS = (
+    'id', 'trip_type', 'client', 'trip_date', 'origin', 'destination',
+    'pickup_time', 'delivery_time', 'mode',
+    'operator_aircraft', 'assigned_to',
+    'airline', 'flight_number', 'departure_time', 'departure_airport', 'departure_terminal',
+    'status', 'phone', 'notes',
+    'created_by', 'created_at', 'edited_by', 'edited_at',
+)
+
+TRIP_EDITABLE = (
+    'trip_type', 'client', 'trip_date', 'origin', 'destination',
+    'pickup_time', 'delivery_time', 'mode',
+    'operator_aircraft', 'assigned_to',
+    'airline', 'flight_number', 'departure_time', 'departure_airport', 'departure_terminal',
+    'status', 'phone', 'notes',
+)
+
+_TRIP_LIMITS = {
+    'id': 80,
+    'trip_type': 40,
+    'client': 120,
+    'trip_date': 40,
+    'origin': 120,
+    'destination': 120,
+    'pickup_time': 80,
+    'delivery_time': 80,
+    'mode': 40,
+    'operator_aircraft': 80,
+    'assigned_to': 120,
+    'airline': 40,
+    'flight_number': 40,
+    'departure_time': 80,
+    'departure_airport': 40,
+    'departure_terminal': 40,
+    'status': 40,
+    'phone': 40,
+    'notes': 4000,
+    'created_by': 120,
+    'created_at': 40,
+    'edited_by': 120,
+    'edited_at': 40,
+}
+
+_TRIP_ALIASES = (
+    ('trip_type', 'trip_type'),
+    ('type', 'trip_type'),
+    ('client', 'client'),
+    ('customer', 'client'),
+    ('trip_date', 'trip_date'),
+    ('date', 'trip_date'),
+    ('origin', 'origin'),
+    ('from', 'origin'),
+    ('from_place', 'origin'),
+    ('destination', 'destination'),
+    ('to', 'destination'),
+    ('to_place', 'destination'),
+    ('pickup_time', 'pickup_time'),
+    ('pickup', 'pickup_time'),
+    ('delivery_time', 'delivery_time'),
+    ('delivery', 'delivery_time'),
+    ('arrival', 'delivery_time'),
+    ('arrival_time', 'delivery_time'),
+    ('mode', 'mode'),
+    ('operator_aircraft', 'operator_aircraft'),
+    ('aircraft', 'operator_aircraft'),
+    ('tail', 'operator_aircraft'),
+    ('operator', 'operator_aircraft'),
+    ('assigned_to', 'assigned_to'),
+    ('crew', 'assigned_to'),
+    ('airline', 'airline'),
+    ('flight_number', 'flight_number'),
+    ('departure_time', 'departure_time'),
+    ('departure_airport', 'departure_airport'),
+    ('departure_terminal', 'departure_terminal'),
+    ('terminal', 'departure_terminal'),
+    ('status', 'status'),
+    ('phone', 'phone'),
+    ('notes', 'notes'),
+)
+
 
 _LIMITS = {
     'swap_id': 80,
@@ -196,6 +286,34 @@ CREATE TABLE IF NOT EXISTS setup_tokens (
 )
 """
 
+_TRIP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS trips (
+    id TEXT PRIMARY KEY,
+    trip_type TEXT,
+    client TEXT,
+    trip_date TEXT,
+    origin TEXT,
+    destination TEXT,
+    pickup_time TEXT,
+    delivery_time TEXT,
+    mode TEXT,
+    operator_aircraft TEXT,
+    assigned_to TEXT,
+    airline TEXT,
+    flight_number TEXT,
+    departure_time TEXT,
+    departure_airport TEXT,
+    departure_terminal TEXT,
+    status TEXT,
+    phone TEXT,
+    notes TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    edited_by TEXT,
+    edited_at TEXT
+)
+"""
+
 
 def today_ny():
     return datetime.now(NY).date().isoformat()
@@ -271,6 +389,130 @@ def parse_team(row):
 
 _FLIGHT_CODE_RE = re.compile(r'^([A-Za-z]{2,3})\s*(\d{1,4}[A-Za-z]?)$')
 _FLIGHT_NAMED_RE = re.compile(r'^([A-Za-z][A-Za-z. ]{1,28}?)\s+(\d{1,4}[A-Za-z]?)$')
+
+
+def _pick_trip(row):
+    src = {norm_key(k): v for k, v in row.items()}
+    out = {}
+    for src_key, dest in _TRIP_ALIASES:
+        if dest in out or src_key not in src:
+            continue
+        out[dest] = as_text(src[src_key], _TRIP_LIMITS[dest])
+    return out
+
+
+def normalize_trip_type(value):
+    key = re.sub(r'[^a-z]', '', (value or '').lower())
+    mapping = {
+        'organ': 'Organ',
+        'airambulance': 'Air Ambulance',
+        'ambulance': 'Air Ambulance',
+        'corporate': 'Corporate',
+        'corp': 'Corporate',
+    }
+    return mapping.get(key)
+
+
+def normalize_trip_mode(value):
+    key = re.sub(r'[^a-z]', '', (value or '').lower())
+    mapping = {
+        'commercial': 'Commercial',
+        'charter': 'Charter',
+        'commobc': 'OBC',
+        'obc': 'OBC',
+        'onboardcourier': 'OBC',
+        'ground': 'Ground',
+    }
+    return mapping.get(key)
+
+
+def normalize_trip_status(value):
+    key = re.sub(r'[^a-z]', '', (value or '').lower())
+    mapping = {
+        'quote': 'Quote',
+        'booked': 'Booked',
+        'inprogress': 'In progress',
+        'completed': 'Completed',
+        'cancelled': 'Cancelled',
+        'canceled': 'Cancelled',
+    }
+    return mapping.get(key)
+
+
+def _valid_iso_date(value):
+    if not value:
+        return True
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        return False
+    try:
+        datetime.strptime(value, '%Y-%m-%d')
+    except ValueError:
+        return False
+    return True
+
+
+def parse_trip(row, partial=False):
+    """Return (fields, error). On create, trip_type is required. Partial updates
+    only include keys that were present in the payload."""
+    if not isinstance(row, dict):
+        return {}, 'expected an object'
+    fields = _pick_trip(row)
+    if 'trip_type' in fields:
+        if fields['trip_type'] is None:
+            if not partial:
+                return {}, 'trip_type is required'
+            return {}, 'trip_type is required'
+        label = normalize_trip_type(fields['trip_type'])
+        if label not in TRIP_TYPES:
+            return {}, 'trip_type must be Organ, Air Ambulance, or Corporate'
+        fields['trip_type'] = label
+    elif not partial:
+        return {}, 'trip_type is required'
+    if 'mode' in fields and fields['mode'] is not None:
+        label = normalize_trip_mode(fields['mode'])
+        if label not in TRIP_MODES:
+            return {}, 'mode must be Charter, Commercial, OBC, or Ground'
+        fields['mode'] = label
+    if 'status' in fields and fields['status'] is not None:
+        label = normalize_trip_status(fields['status'])
+        if label not in TRIP_STATUSES:
+            return {}, 'status must be Quote, Booked, In progress, Completed, or Cancelled'
+        fields['status'] = label
+    if 'trip_date' in fields and fields['trip_date'] is not None and not _valid_iso_date(fields['trip_date']):
+        return {}, 'trip_date must be YYYY-MM-DD'
+    if not partial:
+        if not fields.get('status'):
+            fields['status'] = 'Quote'
+        # Keep only editable fields for insert; stamps are applied by Store.
+        fields = {key: fields.get(key) for key in TRIP_EDITABLE if key in fields or key == 'status'}
+        if 'status' not in fields or not fields['status']:
+            fields['status'] = 'Quote'
+    return fields, None
+
+
+def trip_month_totals(trips):
+    """Monthly counts by trip type. Includes every status except none; callers
+    usually pass Completed and/or Cancelled rows for the history view, or all
+    trips for a simple totals table."""
+    buckets = {}
+    for trip in trips:
+        date = (trip.get('trip_date') or '').strip()
+        if not date:
+            continue
+        key = date[:7]
+        bucket = buckets.setdefault(key, {label: 0 for label in TRIP_TYPES})
+        bucket.setdefault('total', 0)
+        label = trip.get('trip_type') or 'Other'
+        if label not in bucket:
+            bucket[label] = 0
+        bucket[label] += 1
+        bucket['total'] += 1
+    rows = []
+    for key in sorted(buckets):
+        row = {'month': key, 'label': month_label(key)}
+        row.update(buckets[key])
+        rows.append(row)
+    return rows
 
 
 def split_flight(value):
@@ -355,6 +597,7 @@ class Store:
             self._exec(_SCHEMA)
             self._migrate()
             self._ensure_user_tables()
+            self._ensure_trip_table()
             self.conn.commit()
 
     def describe(self):
@@ -421,6 +664,102 @@ class Store:
             row = self._one(swap_id)
             self.conn.commit()
             return row
+
+    def list_trips(self):
+        with self.lock:
+            self._ensure()
+            cols = ', '.join(TRIP_FIELDS)
+            rows = self._exec(f'SELECT {cols} FROM trips')
+            self.conn.commit()
+        rows.sort(key=lambda row: (
+            row.get('trip_date') or '9999-99-99',
+            row.get('created_at') or '',
+            row.get('id') or '',
+        ))
+        return rows
+
+    def get_trip(self, trip_id):
+        with self.lock:
+            self._ensure()
+            row = self._one_trip(trip_id)
+            self.conn.commit()
+        return row
+
+    def create_trip(self, fields, editor):
+        trip_id = secrets.token_urlsafe(12)
+        now = _utc_stamp()
+        row = {key: None for key in TRIP_FIELDS}
+        for key in TRIP_EDITABLE:
+            if key in fields:
+                row[key] = fields[key]
+        if not row.get('status'):
+            row['status'] = 'Quote'
+        row['id'] = trip_id
+        row['created_by'] = editor
+        row['created_at'] = now
+        row['edited_by'] = editor
+        row['edited_at'] = now
+        placeholders = ', '.join('?' for _ in TRIP_FIELDS)
+        values = [row.get(key) for key in TRIP_FIELDS]
+        with self.lock:
+            self._ensure()
+            self._exec(
+                f'INSERT INTO trips ({", ".join(TRIP_FIELDS)}) VALUES ({placeholders})',
+                values,
+            )
+            saved = self._one_trip(trip_id)
+            self.conn.commit()
+            return saved
+
+    def update_trip(self, trip_id, fields, editor):
+        stamp = _utc_stamp()
+        sets = []
+        params = []
+        for key in TRIP_EDITABLE:
+            if key not in fields:
+                continue
+            sets.append(f'{key} = ?')
+            params.append(fields[key])
+        if not sets:
+            return self.get_trip(trip_id)
+        sets.append('edited_by = ?')
+        sets.append('edited_at = ?')
+        params.extend((editor, stamp, trip_id))
+        with self.lock:
+            self._ensure()
+            found = self._exec('SELECT id FROM trips WHERE id = ?', (trip_id,))
+            if not found:
+                self.conn.commit()
+                return None
+            self._exec(f'UPDATE trips SET {", ".join(sets)} WHERE id = ?', params)
+            row = self._one_trip(trip_id)
+            self.conn.commit()
+            return row
+
+    def delete_trip(self, trip_id):
+        with self.lock:
+            self._ensure()
+            found = self._exec('SELECT id FROM trips WHERE id = ?', (trip_id,))
+            if not found:
+                self.conn.commit()
+                return False
+            self._exec('DELETE FROM trips WHERE id = ?', (trip_id,))
+            self.conn.commit()
+            return True
+
+    def clear_trips(self):
+        with self.lock:
+            self._ensure()
+            self._exec('DELETE FROM trips')
+            self.conn.commit()
+
+    def _one_trip(self, trip_id):
+        cols = ', '.join(TRIP_FIELDS)
+        rows = self._exec(f'SELECT {cols} FROM trips WHERE id = ?', (trip_id,))
+        return rows[0] if rows else None
+
+    def _ensure_trip_table(self):
+        self._exec(_TRIP_SCHEMA)
 
     def _ingest(self, rows, kind):
         columns = LOGISTICS if kind == 'moves' else AIRSPACE
@@ -723,6 +1062,7 @@ class Store:
             self._exec(_SCHEMA)
             self._migrate()
             self._ensure_user_tables()
+            self._ensure_trip_table()
             self.conn.commit()
 
     def _open(self):

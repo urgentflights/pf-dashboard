@@ -1,8 +1,8 @@
-"""PF Dashboard — upcoming and recent NKR organ moves for ParaFlight Aero.
+"""ParaFlight ops dashboards — NKR organ moves and general PF trips.
 
 One process, no build step. Render starts it with `python3 server.py` and
 injects PORT. Session login covers the pages and the team API. The ingest
-API uses a bearer token instead.
+API uses a bearer token instead. NKR moves and PF trips are stored separately.
 """
 
 import csv
@@ -27,7 +27,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import store as store_mod
-from store import EDITABLE, FIELDS, public_user, store
+from store import EDITABLE, FIELDS, TRIP_FIELDS, public_user, store
 
 _FAILS = {}
 _FAIL_WINDOW = 600
@@ -305,7 +305,24 @@ def create_app():
     @app.get('/')
     def home():
         return render_template(
+            'home.html',
+            name=session['display_name'],
+            is_admin=bool(g.is_admin),
+        )
+
+    @app.get('/nkr')
+    def nkr_dashboard():
+        return render_template(
             'dashboard.html',
+            name=session['display_name'],
+            today=store_mod.today_ny(),
+            is_admin=bool(g.is_admin),
+        )
+
+    @app.get('/pf')
+    def pf_dashboard():
+        return render_template(
+            'pf.html',
             name=session['display_name'],
             today=store_mod.today_ny(),
             is_admin=bool(g.is_admin),
@@ -338,6 +355,7 @@ def create_app():
                 message=message,
                 error=error,
                 reset_link=reset_link,
+                is_admin=bool(g.is_admin),
             ), status
         return render_template(
             'admin.html',
@@ -346,6 +364,7 @@ def create_app():
             message=message,
             error=error,
             reset_link=reset_link,
+                is_admin=bool(g.is_admin),
         )
 
     @app.get('/api/moves')
@@ -387,6 +406,70 @@ def create_app():
             return jsonify(error='unknown swap_id'), 404
         print(f'[edit] {editor} updated {swap_id}', flush=True)
         return jsonify(ok=True, move=move)
+
+    @app.get('/api/trips')
+    def api_trips():
+        trips = store.list_trips()
+        return jsonify(
+            timezone='America/New_York',
+            today=store_mod.today_ny(),
+            trips=trips,
+            months=store_mod.trip_month_totals(trips),
+        )
+
+    @app.get('/api/trips.csv')
+    def api_trips_csv():
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=TRIP_FIELDS, extrasaction='ignore')
+        writer.writeheader()
+        for trip in store.list_trips():
+            writer.writerow({key: _csv_cell(trip.get(key)) for key in TRIP_FIELDS})
+        body = buf.getvalue().encode('utf-8-sig')
+        return Response(
+            body,
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename="pf-trips.csv"'},
+        )
+
+    @app.post('/api/trips')
+    def api_create_trip():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error='expected a JSON object'), 400
+        parsed, err = store_mod.parse_trip(payload, partial=False)
+        if err:
+            return jsonify(error=err), 400
+        editor = session['display_name']
+        trip = store.create_trip(parsed, editor)
+        print(f'[trip] {editor} created {trip["id"]}', flush=True)
+        return jsonify(ok=True, trip=trip), 201
+
+    @app.patch('/api/trips/<trip_id>')
+    def api_patch_trip(trip_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error='expected a JSON object'), 400
+        parsed, err = store_mod.parse_trip(payload, partial=True)
+        if err:
+            return jsonify(error=err), 400
+        if not any(key in parsed for key in store_mod.TRIP_EDITABLE):
+            return jsonify(error='no trip fields'), 400
+        editor = session['display_name']
+        trip = store.update_trip(trip_id, parsed, editor)
+        if trip is None:
+            return jsonify(error='unknown trip'), 404
+        print(f'[trip] {editor} updated {trip_id}', flush=True)
+        return jsonify(ok=True, trip=trip)
+
+    @app.delete('/api/trips/<trip_id>')
+    def api_delete_trip(trip_id):
+        if not g.is_admin:
+            return jsonify(error='forbidden'), 403
+        if not store.delete_trip(trip_id):
+            return jsonify(error='unknown trip'), 404
+        editor = session.get('display_name') or 'admin'
+        print(f'[trip] {editor} deleted {trip_id}', flush=True)
+        return jsonify(ok=True)
 
     @app.post('/api/ingest/moves')
     def api_ingest_moves():
@@ -557,7 +640,7 @@ def _require_admin():
     if request.path.startswith('/api/'):
         return jsonify(error='forbidden'), 403
     if session.get('display_name') or g.user is not None:
-        return render_template('admin.html', name=session.get('display_name') or '', users=[], message=None, error='Admin only.', reset_link=None, forbidden=True), 403
+        return render_template('admin.html', name=session.get('display_name') or '', users=[], message=None, error='Admin only.', reset_link=None, forbidden=True, is_admin=False), 403
     return redirect('/login')
 
 

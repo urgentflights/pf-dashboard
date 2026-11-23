@@ -4,32 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Admin · PF Dashboard</title>
+  <title>Admin · ParaFlight</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <span class="mark" aria-hidden="true">PF</span>
-      <div>
-        <h1>Staff accounts</h1>
-        <p>ParaFlight Aero · approve and manage access</p>
-      </div>
-    </div>
-    <div class="session">
-      <span class="whoami">{{ name }}</span>
-      <a class="ghost link" href="/">Board</a>
-      <form method="post" action="/logout">
-        <button class="ghost" type="submit">Log out</button>
-      </form>
-    </div>
-  </header>
+  {% set current = 'admin' %}
+  {% set subtitle = 'Staff accounts' %}
+  {% include '_header.html' %}
 
   <main class="wrap">
     {% if forbidden %}
     <p class="form-error" role="alert">Admin only.</p>
-    <p class="form-links"><a href="/">Back to the board</a></p>
+    <p class="form-links"><a href="/">Back to home</a></p>
     {% else %}
     {% if error %}
     <p class="form-error" role="alert">{{ error }}</p>

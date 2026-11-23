@@ -677,3 +677,142 @@ table.moves.totals th:not(:first-child) {
 }
 
 table.users td:last-child { min-width: 12rem; }
+
+/* Dashboard switcher and home chooser */
+.brand-link {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash-switch {
+  display: flex;
+  gap: 4px;
+  background: #163456;
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.dash-switch a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #c5d2e2;
+  text-decoration: none;
+  border: 0;
+  background: transparent;
+  padding: 6px 12px;
+  min-height: 36px;
+  font-weight: 650;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+
+.dash-switch a.is-current {
+  background: #fff;
+  color: var(--navy);
+}
+
+.chooser {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.choice {
+  display: grid;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--copper);
+  border-radius: 16px;
+  padding: 28px 22px;
+  text-decoration: none;
+  color: inherit;
+  min-height: 150px;
+}
+
+.choice h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.03em;
+}
+
+.choice p { margin: 0; color: var(--muted); }
+
+.choice:hover, .choice:focus-visible {
+  border-color: var(--navy);
+  box-shadow: inset 0 0 0 1px var(--navy);
+}
+
+.add-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.editor-grid .span-2, .flight-fields.span-2 { grid-column: 1 / -1; }
+
+.editor select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  min-height: 44px;
+  font: inherit;
+}
+
+.flight-fields {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  margin: 0;
+}
+
+button.danger {
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.card.t-Organ { --accent: #115e59; }
+.card.t-AirAmbulance { --accent: #9f1239; }
+.card.t-Corporate { --accent: #1e3a8a; }
+.card.t-Other { --accent: #475569; }
+
+.badge.t-Organ { background: #ccfbf1; color: #115e59; }
+.badge.t-AirAmbulance { background: #ffe4e6; color: #9f1239; }
+.badge.t-Corporate { background: #e0e7ff; color: #1e3a8a; }
+.badge.t-Other { background: #f1f5f9; color: #334155; }
+
+.badge.s-quote { background: #fff7ed; color: #9a3412; }
+.badge.s-booked { background: #ecfdf3; color: #166534; }
+.badge.s-inprogress { background: #eff6ff; color: #1d4ed8; }
+.badge.s-completed { background: #f1f5f9; color: #334155; }
+.badge.s-cancelled { background: #fef2f2; color: #991b1b; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (min-width: 700px) {
+  .chooser { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 720px) {
+  .top { flex-wrap: wrap; }
+  .dash-switch {
+    order: 3;
+    width: 100%;
+    justify-content: stretch;
+  }
+  .dash-switch a { flex: 1; text-align: center; }
+  .editor-grid { grid-template-columns: 1fr; }
+}

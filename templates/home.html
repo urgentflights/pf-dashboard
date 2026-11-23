@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>ParaFlight</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {% set current = 'home' %}
+  {% set subtitle = 'Choose a dashboard' %}
+  {% include '_header.html' %}
+
+  <main class="wrap">
+    <section class="chooser" aria-label="Dashboards">
+      <a class="choice" href="/nkr">
+        <h2>NKR Dashboard</h2>
+        <p>National Kidney Registry organ moves, the weekly table, and history.</p>
+      </a>
+      <a class="choice" href="/pf">
+        <h2>PF Dashboard</h2>
+        <p>Other organ, air ambulance, and corporate trips.</p>
+      </a>
+    </section>
+    <p class="foot">Internal · ParaFlight Aero</p>
+  </main>
+  <script>
+    (function () {
+      var hash = (location.hash || '').replace('#', '').toLowerCase();
+      if (hash === 'nkr-moves') hash = 'nkr';
+      if (hash === 'nkr' || hash === 'history' || hash === 'board') {
+        location.replace('/nkr#' + hash);
+      }
+    })();
+  </script>
+</body>
+</html>

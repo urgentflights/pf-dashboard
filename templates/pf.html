@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PF Dashboard · ParaFlight</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-today="{{ today }}" data-name="{{ name }}" data-tab="board" data-admin="{{ '1' if is_admin else '0' }}">
+  {% set current = 'pf' %}
+  {% set subtitle = 'PF Dashboard' %}
+  {% include '_header.html' %}
+
+  <main class="wrap">
+    <nav class="tabs" role="tablist" aria-label="PF Dashboard views">
+      <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="true">Board</button>
+      <button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false">History</button>
+    </nav>
+
+    <p id="banner" class="form-error" hidden></p>
+
+    <div id="panel-board" class="panel" role="tabpanel" aria-labelledby="tab-board">
+      <section class="tiles" id="tiles" aria-label="Summary">
+        <button type="button" data-tile="today" aria-pressed="false">
+          <span class="num" id="n-today">–</span>
+          <span class="label">Trips today</span>
+          <span class="hint">New York date</span>
+        </button>
+        <button type="button" data-tile="next" aria-pressed="false">
+          <span class="num" id="n-next">–</span>
+          <span class="label">Next 3 days</span>
+          <span class="hint" id="hint-next">Tomorrow through +3</span>
+        </button>
+        <button type="button" data-tile="quotes" aria-pressed="false">
+          <span class="num" id="n-quotes">–</span>
+          <span class="label">Quotes</span>
+          <span class="hint">Not yet booked</span>
+        </button>
+      </section>
+
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr">Search</span>
+          <input id="q" type="search" placeholder="Search client, route, crew, flight, notes" autocomplete="off">
+        </label>
+        <div class="chips" id="types" role="group" aria-label="Filter by trip type">
+          <button type="button" data-type="all" aria-pressed="true">All</button>
+          <button type="button" data-type="Organ" aria-pressed="false">Organ</button>
+          <button type="button" data-type="Air Ambulance" aria-pressed="false">Air Ambulance</button>
+          <button type="button" data-type="Corporate" aria-pressed="false">Corporate</button>
+        </div>
+        <div class="bar">
+          <div class="bar-actions">
+            <button type="button" class="primary" id="add-trip">Add trip</button>
+            <a class="ghost link" href="/api/trips.csv">Export CSV</a>
+            <button type="button" class="ghost" id="refresh">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="trip-form-wrap" hidden></div>
+      <p id="meta" class="meta">Loading trips…</p>
+      <div id="board"></div>
+      <noscript><p class="form-error">This board needs JavaScript. Export CSV still works from the link above once you are signed in.</p></noscript>
+    </div>
+
+    <div id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr">Search history</span>
+          <input id="hist-q" type="search" placeholder="Search client, route, crew, flight" autocomplete="off">
+        </label>
+        <div class="filters">
+          <label class="select">
+            <span>Month</span>
+            <select id="hist-month">
+              <option value="all">All months</option>
+            </select>
+          </label>
+        </div>
+        <div class="chips" id="hist-types" role="group" aria-label="Filter history by trip type">
+          <button type="button" data-hist-type="all" aria-pressed="true">All</button>
+          <button type="button" data-hist-type="Organ" aria-pressed="false">Organ</button>
+          <button type="button" data-hist-type="Air Ambulance" aria-pressed="false">Air Ambulance</button>
+          <button type="button" data-hist-type="Corporate" aria-pressed="false">Corporate</button>
+        </div>
+        <div class="chips" id="hist-status" role="group" aria-label="Filter history by status">
+          <button type="button" data-hist-status="completed" aria-pressed="true">Completed</button>
+          <button type="button" data-hist-status="cancelled" aria-pressed="false">Cancelled</button>
+          <button type="button" data-hist-status="all" aria-pressed="false">All</button>
+        </div>
+      </div>
+      <p id="hist-meta" class="meta">Loading history…</p>
+      <div class="table-wrap">
+        <table class="moves" id="hist-table">
+          <caption class="sr">Past trips, newest first</caption>
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Type</th>
+              <th scope="col">Client</th>
+              <th scope="col">From to</th>
+              <th scope="col">Mode</th>
+              <th scope="col">Flight</th>
+              <th scope="col">Status</th>
+              <th scope="col">Assigned</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <section class="months">
+        <h2>Month-by-month totals</h2>
+        <p class="lede">All trips with a date, including quotes and cancelled trips.</p>
+        <div class="table-wrap">
+          <table class="moves totals" id="pf-months">
+            <caption class="sr">Monthly totals by trip type</caption>
+            <thead>
+              <tr>
+                <th scope="col">Month</th>
+                <th scope="col">Organ</th>
+                <th scope="col">Air Ambulance</th>
+                <th scope="col">Corporate</th>
+                <th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <p class="foot">Internal · ParaFlight Aero · times shown as entered</p>
+  </main>
+  <script src="/static/pf.js"></script>
+</body>
+</html>
