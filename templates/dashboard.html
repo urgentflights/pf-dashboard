@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PF Dashboard</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-today="{{ today }}" data-name="{{ name }}">
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">PF</span>
+      <div>
+        <h1>PF Dashboard</h1>
+        <p>ParaFlight Aero · NKR organ moves</p>
+      </div>
+    </div>
+    <div class="session">
+      <span class="whoami">{{ name }}</span>
+      <form method="post" action="/logout">
+        <button class="ghost" type="submit">Log out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="tiles" id="tiles" aria-label="Summary">
+      <button type="button" data-tile="today" aria-pressed="false">
+        <span class="num" id="n-today">–</span>
+        <span class="label">Moves today</span>
+        <span class="hint">New York date</span>
+      </button>
+      <button type="button" data-tile="next" aria-pressed="false">
+        <span class="num" id="n-next">–</span>
+        <span class="label">Next 3 days</span>
+        <span class="hint" id="hint-next">Tomorrow through +3</span>
+      </button>
+      <button type="button" data-tile="open" aria-pressed="false">
+        <span class="num" id="n-open">–</span>
+        <span class="label">Unassigned</span>
+        <span class="hint">OBC and charter</span>
+      </button>
+    </section>
+
+    <div class="toolbar">
+      <label class="search">
+        <span class="sr">Search</span>
+        <input id="q" type="search" placeholder="Search swap, center, name, flight, AWB" autocomplete="off">
+      </label>
+      <div class="chips" id="types" role="group" aria-label="Filter by type">
+        <button type="button" data-type="all" aria-pressed="true">All</button>
+        <button type="button" data-type="Commercial" aria-pressed="false">Commercial</button>
+        <button type="button" data-type="Charter" aria-pressed="false">Charter</button>
+        <button type="button" data-type="OBC" aria-pressed="false">OBC</button>
+        <button type="button" data-type="Ground" aria-pressed="false">Ground</button>
+        <button type="button" data-type="Internal" aria-pressed="false">Internal</button>
+      </div>
+      <div class="bar">
+        <div class="chips" id="statuses" role="group" aria-label="Filter by status">
+          <button type="button" data-status="all" aria-pressed="true">All</button>
+          <button type="button" data-status="Scheduled" aria-pressed="false">Scheduled</button>
+          <button type="button" data-status="Completed" aria-pressed="false">Completed</button>
+          <button type="button" data-status="Removed" aria-pressed="false">Removed</button>
+        </div>
+        <div class="bar-actions">
+          <button type="button" class="ghost" id="history" aria-pressed="false">History</button>
+          <a class="ghost link" href="/api/moves.csv">Export CSV</a>
+          <button type="button" class="ghost" id="refresh">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="banner" class="form-error" hidden></p>
+    <p id="meta" class="meta">Loading moves…</p>
+    <div id="board"></div>
+    <noscript><p class="form-error">This board needs JavaScript. Export CSV still works from the link above once you are signed in.</p></noscript>
+    <p class="foot">Internal · ParaFlight Aero · times shown as scheduled, with their own zone</p>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

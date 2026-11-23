@@ -1,0 +1,36 @@
+# PF Dashboard. Apply from the repo after this file is on main:
+# https://dashboard.render.com/blueprint/new?repo=https://github.com/urgentflights/pf-dashboard
+# TEAM_PASSWORD is entered in the Dashboard on the first Blueprint create.
+# INGEST_TOKEN and SECRET_KEY are generated once and then left alone.
+# Free Postgres expires 30 days after creation. Before that, change the database
+# plan to basic-256mb (same size, kept) and sync the Blueprint. See the README.
+services:
+  - type: web
+    name: pf-dashboard
+    runtime: python
+    plan: starter
+    region: virginia
+    branch: main
+    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 server.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pf-dashboard-db
+          property: connectionString
+      - key: TEAM_PASSWORD
+        sync: false
+      - key: INGEST_TOKEN
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+
+databases:
+  - name: pf-dashboard-db
+    plan: free
+    region: virginia
+    databaseName: pf_dashboard
+    user: pf_dashboard_user
+    postgresMajorVersion: "16"
+    ipAllowList: []
