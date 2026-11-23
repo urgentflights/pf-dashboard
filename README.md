@@ -1,2 +1,239 @@
-# pf-dashboard
-PF Dashboard - organ moves at a glance (NKR + Airspace + in-house OBC/charter assignments)
+# PF Dashboard
+
+Dispatch board for ParaFlight Aero. One glance shows every upcoming and recent National Kidney Registry organ move, who is on the trip, and the Airspace driver or flight when automation has filled it in.
+
+The app is a single Python process (`server.py`) with no build step. On Render it uses Postgres. On a laptop, with `DATABASE_URL` unset, it uses a local SQLite file.
+
+Do not commit operational move logs. The sample CSV that shaped the columns stays out of this repo.
+
+## Run locally
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export TEAM_PASSWORD='choose-a-password'
+export INGEST_TOKEN='choose-a-token'
+export SECRET_KEY='choose-a-secret'
+python3 server.py
+```
+
+Open http://localhost:10000 . The process listens on `0.0.0.0` and `$PORT` (default `10000`).
+
+```bash
+python3 -m unittest tests.test_ingest -v
+```
+
+## Environment variables
+
+| Variable | Where it comes from | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Render Blueprint `fromDatabase` (`connectionString`). Unset locally. | Postgres URL. A `postgres://` or `postgresql://` URL uses Postgres (TLS when the host is external). Unset, or a `sqlite:///` URL, uses SQLite at `data/pf.sqlite`. |
+| `TEAM_PASSWORD` | You type it in the Dashboard when the Blueprint is first created (`sync: false`). | Shared team password for the login page. |
+| `INGEST_TOKEN` | Render generates it (`generateValue`). Copy it from the service Environment tab. | Bearer token for the ingest API. |
+| `SECRET_KEY` | Render generates it (`generateValue`). | Signs the session cookie. |
+| `PORT` | Set by Render. | HTTP port. |
+| `RENDER` | Set by Render to `true`. | Marks the session cookie Secure. |
+
+Leave `DATABASE_URL` unset on a laptop. The Render database allow list is empty, so only services on Render's private network can open it. The web service uses the internal connection string.
+
+If `TEAM_PASSWORD` is unset, the login page explains that and will not sign anyone in. If `INGEST_TOKEN` is unset, ingest returns 401.
+
+## What the board shows
+
+The default view groups legs by `pickup_date` from today forward. Today is the calendar date in `America/New_York`, not the laptop's zone. Pickup and delivery times are shown as stored, including the zone abbreviation in the string. History shows earlier pickup dates. A leg with no pickup date stays on the upcoming board so it is not hidden.
+
+Summary tiles, counted across the whole log (filters do not change them):
+
+- **Moves today** — `pickup_date` is today in New York, and status is not Removed.
+- **Next 3 days** — tomorrow through three days out, status not Removed. Today is not included.
+- **Unassigned** — method is OBC (`CommObc`) or Charter, nobody in `assigned_to`, status is not Completed or Removed, and the pickup date is today or later (or missing).
+
+Click a tile to show just that set. Type chips, status chips, and the search box narrow the list further. Search checks the swap id, centers, method, times, status, crew, aircraft, phone, notes, and Airspace fields.
+
+OBC and Charter legs with nobody assigned are marked with an amber **Unassigned** line, including in history, unless the leg is Removed. Commercial, Ground, and Internal legs with nobody named are not flagged.
+
+Edit writes `assigned_to`, `aircraft`, `phone`, and `notes`, and stamps `edited_by` / `edited_at`. The board refreshes about once a minute, and waits while an edit is open.
+
+## Auth
+
+`GET /login` and `GET /healthz` are public. Everything else needs a session cookie from `POST /login` with form fields `name` and `password`. `name` is the display name stamped on edits (trimmed, required, 40 characters). The cookie is `pf_session`, HttpOnly, SameSite=Lax, and lasts 30 days. On Render it is Secure.
+
+Eight wrong passwords from the same address within ten minutes return 429.
+
+`POST /logout` clears the cookie.
+
+Ingest does not accept the session cookie. The read API does not accept the ingest token.
+
+## API
+
+Times and dates are strings. Empty columns are JSON `null`. The server never deletes a leg. A Removed leg is a status change.
+
+Sending a key updates that column. Omitting a key leaves the column alone. A present `null` or blank string clears the column, with one exception: once `first_seen` is non-empty, ingest will not replace it or clear it.
+
+A moves payload cannot change team fields or Airspace fields. An Airspace payload cannot change logistics fields or team fields. On the Airspace endpoint only, `status` means the Airspace status text.
+
+`swap_id` is required, at most 80 characters, and may not contain control characters. Other text is trimmed and truncated to a column cap (centers 120, notes 4000, driver names 200, the rest 40–80). A list of driver names is joined with `, `.
+
+### `POST /api/ingest/moves`
+
+`Authorization: Bearer $INGEST_TOKEN` and `Content-Type: application/json`.
+
+Body is a JSON list, or an object with a list under `moves`, `legs`, `items`, `orders`, or `data`.
+
+Accepted keys (CSV names, plus aliases):
+
+| Key | Stored as |
+| --- | --- |
+| `swap_id` | `swap_id` |
+| `pickup_date` | `pickup_date` (`YYYY-MM-DD`) |
+| `donor`, `donor_center` | `donor` |
+| `recipient`, `recipient_center` | `recipient` |
+| `method` | `method` (stored as sent; `CommObc` stays `CommObc`) |
+| `pickup`, `pickup_time` | `pickup` |
+| `delivery`, `delivery_time` | `delivery` |
+| `status` | `status` (`Scheduled`, `Completed`, `Removed`, or anything else) |
+| `first_seen` | `first_seen` |
+| `last_seen` | `last_seen` |
+
+```bash
+curl -sS -X POST "$BASE/api/ingest/moves" \
+  -H "Authorization: Bearer $INGEST_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "swap_id": "11593/1/1",
+    "pickup_date": "2026-11-24",
+    "donor": "UMinn",
+    "recipient": "Penn",
+    "method": "CommObc",
+    "pickup": "11/24 10:00 CST",
+    "delivery": "11/24 18:15 EST",
+    "status": "Scheduled",
+    "first_seen": "2026-11-20",
+    "last_seen": "2026-11-22"
+  }]'
+```
+
+`200` body:
+
+```json
+{"ok": true, "inserted": 1, "updated": 0, "skipped": 0, "errors": []}
+```
+
+A bad row is skipped and listed: `{"index": 0, "error": "missing swap_id"}`. The rest of the batch is still saved. `errors` is also `swap_id too long`, `invalid swap_id`, or `expected an object`. The whole request is `400` `{"error": "expected a JSON list"}` when the body is not a list or one of those envelopes. Missing or wrong token is `401` `{"error": "unauthorized"}`.
+
+### `POST /api/ingest/airspace`
+
+Same auth, envelopes, and response shape. Upsert by `swap_id`. If the leg does not exist yet, a row is created with just the id and the Airspace columns.
+
+| Key | Stored as |
+| --- | --- |
+| `swap_id` | `swap_id` |
+| `airspace_order_id`, `order_id` | `airspace_order_id` |
+| `airspace_driver`, `driver_names`, `drivers`, `driver_name`, `driver` | `airspace_driver` |
+| `airspace_flight`, `flight_number`, `flight` | `airspace_flight` |
+| `airspace_awb`, `awb` | `airspace_awb` |
+| `airspace_status`, `status` | `airspace_status` |
+
+```bash
+curl -sS -X POST "$BASE/api/ingest/airspace" \
+  -H "Authorization: Bearer $INGEST_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "swap_id": "11593/1/1",
+    "order_id": "AS-100",
+    "driver_names": ["Sam Ruiz", "Jo Park"],
+    "flight_number": "DL 1842",
+    "awb": "001-12345678",
+    "airspace_status": "Tendered"
+  }]'
+```
+
+### `GET /api/moves`
+
+Session cookie. Returns every leg.
+
+```json
+{
+  "timezone": "America/New_York",
+  "today": "2026-11-23",
+  "moves": [
+    {
+      "swap_id": "11593/1/1",
+      "pickup_date": "2026-11-24",
+      "donor": "UMinn",
+      "recipient": "Penn",
+      "method": "CommObc",
+      "pickup": "11/24 10:00 CST",
+      "delivery": "11/24 18:15 EST",
+      "status": "Scheduled",
+      "first_seen": "2026-11-20",
+      "last_seen": "2026-11-22",
+      "airspace_order_id": "AS-100",
+      "airspace_driver": "Sam Ruiz, Jo Park",
+      "airspace_flight": "DL 1842",
+      "airspace_awb": "001-12345678",
+      "airspace_status": "Tendered",
+      "assigned_to": "Alex Rivera",
+      "aircraft": null,
+      "phone": "555-0100",
+      "notes": "Wheels up 10:15",
+      "edited_by": "Alex",
+      "edited_at": "2026-11-23T06:12:04Z"
+    }
+  ]
+}
+```
+
+Order is `pickup_date`, then `swap_id`. Missing dates sort last. `401` when the session is missing.
+
+### `PATCH /api/moves`
+
+Session cookie. JSON object. `swap_id` plus at least one of `assigned_to`, `aircraft` (`tail` and `aircraft_tail` are aliases), `phone` (`contact`, `phone_contact`), `notes`. Blank clears a field. Sets `edited_by` from the login name and `edited_at` to UTC `YYYY-MM-DDTHH:MM:SSZ`.
+
+```bash
+curl -sS -X PATCH "$BASE/api/moves" \
+  -H "Content-Type: application/json" \
+  --cookie "pf_session=..." \
+  -d '{"swap_id":"11593/1/1","assigned_to":"Alex Rivera","aircraft":"N552PF","phone":"555-0100","notes":"Wheels up 10:15"}'
+```
+
+`200` `{"ok": true, "move": { ...same shape as one element of moves... }}`. `400` `{"error": "missing swap_id"}` or `{"error": "no team fields"}` or `{"error": "expected a JSON object"}`. `404` `{"error": "unknown swap_id"}`.
+
+### `GET /api/moves.csv`
+
+Session cookie. All legs, same columns as the JSON object, header row, UTF-8 with BOM. `Content-Disposition: attachment; filename="moves.csv"`. Cells that start with `=`, `+`, `-`, or `@` are prefixed with a quote.
+
+### `GET /healthz`
+
+No auth. `200` body `ok\n` when the database answers `SELECT 1`. `503` body `db unavailable\n` when it does not. Render's health check uses this path.
+
+## Deploy on Render
+
+`render.yaml` is the Blueprint. It matches the other ParaFlight apps: Python, `pip install -r requirements.txt`, `python3 server.py`, region `virginia`.
+
+- Web service `pf-dashboard`, plan `starter` (legacy name for 0.5 CPU / 512 MB, still accepted by the current Blueprint schema), health check `/healthz`, branch `main`.
+- Postgres `pf-dashboard-db`, plan `free`, PostgreSQL 16, database `pf_dashboard`, user `pf_dashboard_user`, public IP allow list empty.
+
+Free Postgres expires 30 days after it is created, and backups go with it. Before that day, change the database `plan` to `basic-256mb` (the current id for that size is `0.1c-256mb`; both are in the schema) and sync the Blueprint, or change the plan in the Dashboard. `databaseName`, `user`, `region`, and `postgresMajorVersion` cannot be changed later.
+
+After this file is on `main`:
+
+1. Open https://dashboard.render.com/blueprint/new?repo=https://github.com/urgentflights/pf-dashboard
+2. Set `TEAM_PASSWORD` when prompted. Render fills `INGEST_TOKEN` and `SECRET_KEY`.
+3. Apply, then copy `INGEST_TOKEN` from the service Environment tab for the automation.
+
+The service does not spin down on the starter plan. The filesystem is ephemeral; the SQLite fallback is only for local runs.
+
+## Custom domain later
+
+Custom domains are for the web service, after it is live. TLS is issued and renewed for you. You do not terminate TLS in the app.
+
+1. Dashboard → **pf-dashboard** → **Settings** → **Custom Domains** → **Add Custom Domain**.
+2. For a subdomain such as `moves.example.com`, add a CNAME at your DNS host. Name `moves`, target the service hostname shown in the Dashboard (`pf-dashboard.onrender.com`, or the exact value Render prints).
+3. For an apex name (`example.com`), use your DNS host's ALIAS, ANAME, or flattened CNAME. Where those are not available, use the A record and IP Render shows on the domain page.
+4. Remove any AAAA records for that name. Render is IPv4.
+5. Click **Verify**. If it fails, wait a few minutes and flush the resolver cache, then verify again. The certificate follows verification.
+6. If the zone has CAA records, allow `letsencrypt.org` and `pki.goog`, including `issuewild` if you use a wildcard.
+
+To declare the hostname in the Blueprint as well, add a `domains` list on the web service (`domains: [moves.example.com]`). That only records the name. DNS is still configured at the registrar. After at least one custom domain works, the `onrender.com` hostname can be turned off under **Render Subdomain** on the same settings page.

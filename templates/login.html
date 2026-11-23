@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PF Dashboard</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <form class="login" method="post" action="/login">
+      <p class="mark" aria-hidden="true">PF</p>
+      <h1>PF Dashboard</h1>
+      <p class="lede">ParaFlight Aero. Sign in with the team password. Your name is stamped on every edit.</p>
+      {% if error %}
+      <p class="form-error" role="alert">{{ error }}</p>
+      {% endif %}
+      <label>
+        Your name
+        <input name="name" required maxlength="40" autocomplete="nickname" value="{{ name or '' }}" autofocus>
+      </label>
+      <label>
+        Team password
+        <input name="password" type="password" required autocomplete="current-password">
+      </label>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>
